@@ -12,6 +12,15 @@ def enum_2d(arr, eol=None):
             yield x, y, arr[y][x]
         if eol:
             eol()
+
+def enum_2d_tm(arr, eol=None):
+    for x in range(len(arr[0])-1, -1, -1):
+        for y in range(len(arr)):
+            yield x, y, arr[y][x]
+        if eol:
+            eol()
+
+
 '''
 data/pics/floor.png
 data/pics/template.png
@@ -50,6 +59,7 @@ class Cell:
     def __init__(self, name):
         self.name=name
         self.passable = True
+        self.vacant = True
         self.waypoint_char = '\0'
 
 
@@ -61,9 +71,9 @@ class Level:
         self.monsters = []
         self.entry_pos = (0,0)
 
-        for x, y, c in enum_2d(self.m, lambda: print('\n')):
-            #print(x, y, c)
-            pass
+        #for x, y, c in enum_2d(self.m, lambda: print('\n')):
+        #    #print(x, y, c)
+        #    pass
 
 
 class Monster:
@@ -122,7 +132,7 @@ class Bot(Monster):
         if not self.path and self.waypoints:
             self.current_waypoint = (self.current_waypoint + 1) % len(self.waypoints)
             self.path = self.make_path(
-                (self.x//TILE_W, self.y//TILE_W),
+                ((self.x+TILE_W//2)//TILE_W, (self.y+TILE_W//2)//TILE_W),
                 self.waypoints[self.current_waypoint])
 
             print('update path to', self.path)
@@ -131,11 +141,11 @@ class Bot(Monster):
             path_x, path_y = path_tx*TILE_W, path_ty*TILE_W
             if manh_dist((self.x, self.y), (path_x, path_y)) < 10:
                 self.path = self.path[1:]
-                print('dist:', )
+                #print('dist:', )
                 print('reduce path to', self.path)
             else:
                 tgt_x, tgt_y = path_x, path_y
-                print('set tgt to', path_x, path_y, ' pos:', self.x, self.y)
+                #print('set tgt to', path_x, path_y, ' pos:', self.x, self.y)
                 break
 
         self.clear_input()
@@ -146,20 +156,37 @@ class Bot(Monster):
         if self.in_s: s += 'S'
         if self.in_a: s += 'A'
         if self.in_d: s += 'D'
-        print('in:', s)
+        #print('in:', s)
 
-    def make_path(self, src, tgt):
+    def make_path(self, src, tgt, level=None):
+        #return [tgt]
         sx, sy = src
         tx, ty = tgt
-        level = session.level
-        level_w = len(level.m[0])
-        level_h = len(level.m)
-        cost=make_2d(lambda x,y: (999 if level.m[y][x].passable else 1000),
-                     len(level.m[0]), len(level.m))
+        if (sx,sy) == (tx,ty):
+            print('Warning: bad make_path call')
+            return [(tx, ty)]
+
+        print('s:',sx,sy,'t:',tx,ty)
+        if not level:
+            level = session.level
+        level_w = len(level.m)
+        level_h = len(level.m[0])
+        def passable_score(c):
+            if not c.passable:
+                return 1000
+            elif not c.vacant:
+                return 1001
+            else:
+                return 999
+
+        cost=make_2d(lambda x,y: passable_score(level.m[x][y]),
+                     level_w, level_h)
         def draw_cost():
-            for x,y,c in enum_2d(cost, lambda:print()):
+            for y, x, c in enum_2d_tm(cost, lambda:print()):
                 if c == 1000:
                     print('#', end='')
+                elif c == 1001:
+                    print('@', end='')
                 elif c == -1:
                     print('.', end='')
                 elif c <= ord('z') - ord('a'):
@@ -177,23 +204,62 @@ class Bot(Monster):
         pts = [src]
 
         cost[sx][sy] = 0
+        cost[tx][ty] = 20
         draw_cost()
 
         current_cost = 0
-        for i in range(10):
+        for r in range(1,20):
             newpts = []
             for p in pts:
                 px, py = p
-                for neigh in neighbours(px, py):
-                    pass
+                for nx, ny in neighbours(px, py):
+                    nc = cost[nx][ny]
+                    if nc < 1000 and nc > r:
+                        cost[nx][ny] = r
+                        newpts.append((nx, ny))
+            pts = newpts
+        result = []
 
         draw_cost()
+        if cost[tx][ty] < 999:
+            x = tx
+            y = ty
+            c = cost[tx][ty]
+            while 1:
+                result.insert(0, (x, y))
 
+                #print (':::', (x,y), c,'path:', result)
 
-        return [tgt]
+                for nx, ny in neighbours(x, y):
+                    #print('n:', (nx,ny), cost[nx][ny], c - 1)
+                    if cost[nx][ny] == c - 1:
+                        x = nx
+                        y = ny
+                        c = c - 1
+                        break
+                else:
+
+                    raise Exception('no path' + str(list(neighbours(x, y))) + str(result))
+                if (x, y) == (sx, sy):
+                    result.insert(0, (x, y))
+                    break
+        #result.reverse()
+        return result
+
 
     def prepare_waypoints(self, level):
-        self.waypoints = list_waypoints(level, self.char)
+        waypoints = list_waypoints(level, self.char)
+        # choose wp order
+        self.waypoints=[]
+        self.waypoints.append(waypoints.pop())
+        nw = len(waypoints)
+        lwx, lwy = self.waypoints[0]
+        for i in range(nw):
+            ii, w = min([(len(self.make_path((lwx, lwy), (w[0], w[1]), level)), w) for w in waypoints], key=lambda x: x[0])
+            waypoints.remove(w)
+            lwx, lwy = w
+            self.waypoints.append(w)
+
         print('WP:', self.waypoints)
 
 
@@ -228,8 +294,30 @@ class Session:
         self.player.x,self.player.y = self.level.entry_pos
         #self.app = None
         #self.level.objects.append(Object('box', TILE_W*5, TILE_W*4))
+
+    def xy2ctxy(self, x, y):
+        tx = (x + TILE_W // 2) // TILE_W
+        ty = (y + TILE_W // 2) // TILE_W
+        c = None
+        if 0 <= tx < len(self.level.m[0]) and 0 <= ty < len(self.level.m):
+            c = self.level.m[ty][tx]
+        return tx, ty, c
+
     def update(self):
         self.player.ai()
+        for x, y, c in enum_2d(self.level.m):
+            c.vacant = True
+
+        def vm(m):
+            tx = (m.x + TILE_W//2) // TILE_W
+            ty = (m.y + TILE_W // 2) // TILE_W
+            if 0 <= tx < len(self.level.m) and 0 <= ty < len(self.level.m[0]):
+                self.level.m[ty][tx].vacant = False
+
+        for m in self.level.monsters:
+            vm(m)
+        vm(self.player)
+
         for m in self.level.monsters:
             m.ai()
         self.m_phy(self.player)
@@ -238,26 +326,45 @@ class Session:
 
     def m_phy(self, m):
         speed=5
+        dx = dy = 0
         if m.in_w:
-            m.y+=speed
+            dy+=speed
         if m.in_s:
-            m.y-=speed
+            dy-=speed
         if m.in_a:
-            m.x-=speed
+            dx-=speed
         if m.in_d:
-            m.x+=speed
+            dx+=speed
+
+        tx, ty, c = self.xy2ctxy(m.x+dx, m.y+dy)
+        if c and c.passable:
+            m.x+=dx
+            m.y+=dy
+            return
+
+        tx, ty, c = self.xy2ctxy(m.x + dx, m.y)
+        if c and c.passable:
+            m.x += dx
+            return
+
+        tx, ty, c = self.xy2ctxy(m.x, m.y + dy)
+        if c and c.passable:
+            m.y += dy
+            return
 
 
 demo_level_str = '''
-#############
-#..,,p;;;;###
-#.#P#,###;###
-#@#,#,###g.>#
-#..,#,;;;;###
-#.#,#p#.....#
-#.0,p..S.*..#
-#...........#
-#############
+##############
+#..P,,p;;;####
+#.#,##,##.####
+#@#,##,##.g.>#
+#..,##,;;;####
+#.#,##p#.....#
+#..,##,......#
+#..,##,......#
+#.0p,,,.S.*..#
+#............#
+##############
 '''
 
 def char_to_cell(ch) -> Cell:
