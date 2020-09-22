@@ -1,4 +1,5 @@
 import pyglet
+# import pymunk
 
 TILE_W = 64
 def make_2d(f, w, h):
@@ -49,6 +50,7 @@ class Cell:
     def __init__(self, name):
         self.name=name
         self.passable = True
+        self.waypoint_char = '\0'
 
 
 class Level:
@@ -63,12 +65,153 @@ class Level:
             #print(x, y, c)
             pass
 
+
 class Monster:
     def __init__(self, tilename=''):
         self.x = 0
         self.y = 0
         self.hp = 0
         self.tilename=tilename
+        self.char='?'
+        self.clear_input()
+
+    def clear_input(self):
+        self.in_w = False
+        self.in_s = False
+        self.in_a = False
+        self.in_d = False
+        self.in_attack = False
+        self.tgt = (self.x, self.y)
+
+    def move_to_tgt(self):
+        tolerance = 5
+        if self.tgt[0] < self.x - tolerance:
+            self.in_a = True
+        elif self.tgt[0] > self.x + tolerance:
+            self.in_d = True
+
+        if self.tgt[1] < self.y - tolerance:
+            self.in_s = True
+        elif self.tgt[1] > self.y + tolerance:
+            self.in_w = True
+
+    def ai(self):
+        pass
+
+def manh_dist(A,B):
+    return max(abs(A[0]-B[0]), abs(A[1]-B[1]))
+
+
+def list_waypoints(level, ch):
+    result=[]
+    for x,y,c in enum_2d(level.m):
+        if c.waypoint_char == ch:
+            result.append((x,y))
+    return result
+
+class Bot(Monster):
+    def __init__(self, *args, **kwargs):
+        Monster.__init__(self, *args, **kwargs)
+        self.waypoints=[]
+        self.path=[]
+        self.current_waypoint = 0
+
+    def ai(self):
+        #print('bot ai')
+        tgt_x, tgt_y = self.x, self.y
+        if not self.path and self.waypoints:
+            self.current_waypoint = (self.current_waypoint + 1) % len(self.waypoints)
+            self.path = self.make_path(
+                (self.x//TILE_W, self.y//TILE_W),
+                self.waypoints[self.current_waypoint])
+
+            print('update path to', self.path)
+        while self.path:
+            path_tx, path_ty = self.path[0]
+            path_x, path_y = path_tx*TILE_W, path_ty*TILE_W
+            if manh_dist((self.x, self.y), (path_x, path_y)) < 10:
+                self.path = self.path[1:]
+                print('dist:', )
+                print('reduce path to', self.path)
+            else:
+                tgt_x, tgt_y = path_x, path_y
+                print('set tgt to', path_x, path_y, ' pos:', self.x, self.y)
+                break
+
+        self.clear_input()
+        self.tgt = tgt_x, tgt_y
+        self.move_to_tgt()
+        s=''
+        if self.in_w: s+='W'
+        if self.in_s: s += 'S'
+        if self.in_a: s += 'A'
+        if self.in_d: s += 'D'
+        print('in:', s)
+
+    def make_path(self, src, tgt):
+        sx, sy = src
+        tx, ty = tgt
+        level = session.level
+        level_w = len(level.m[0])
+        level_h = len(level.m)
+        cost=make_2d(lambda x,y: (999 if level.m[y][x].passable else 1000),
+                     len(level.m[0]), len(level.m))
+        def draw_cost():
+            for x,y,c in enum_2d(cost, lambda:print()):
+                if c == 1000:
+                    print('#', end='')
+                elif c == -1:
+                    print('.', end='')
+                elif c <= ord('z') - ord('a'):
+                    print(chr(ord('a')+c), end='')
+                else:
+                    print('Z', end='')
+
+        def neighbours(x, y):
+            dd = [(1,0), (0,1), (-1,0), (0,-1)]
+            for dx, dy in dd:
+                nx = x + dx
+                ny = y + dy
+                if 0 <= nx < level_w and 0 <= ny < level_h:
+                    yield (nx, ny)
+        pts = [src]
+
+        cost[sx][sy] = 0
+        draw_cost()
+
+        current_cost = 0
+        for i in range(10):
+            newpts = []
+            for p in pts:
+                px, py = p
+                for neigh in neighbours(px, py):
+                    pass
+
+        draw_cost()
+
+
+        return [tgt]
+
+    def prepare_waypoints(self, level):
+        self.waypoints = list_waypoints(level, self.char)
+        print('WP:', self.waypoints)
+
+
+class Player(Monster):
+    def __init__(self, *args, **kwargs):
+        Monster.__init__(self, *args, **kwargs)
+
+    def ai(self):
+        self.clear_input()
+        if session.app.keys[pyglet.window.key.W]:
+            self.in_w = True
+        if session.app.keys[pyglet.window.key.S]:
+            self.in_s = True
+        if session.app.keys[pyglet.window.key.A]:
+            self.in_a = True
+        if session.app.keys[pyglet.window.key.D]:
+            self.in_d = True
+
 
 class Object:
     def __init__(self, name, x=0, y=0):
@@ -81,20 +224,38 @@ class Object:
 class Session:
     def __init__(self):
         self.level=load_level_str(demo_level_str)
-        self.player = Monster()
+        self.player = Player()
         self.player.x,self.player.y = self.level.entry_pos
+        #self.app = None
         #self.level.objects.append(Object('box', TILE_W*5, TILE_W*4))
+    def update(self):
+        self.player.ai()
+        for m in self.level.monsters:
+            m.ai()
+        self.m_phy(self.player)
+        for m in self.level.monsters:
+            self.m_phy(m)
 
+    def m_phy(self, m):
+        speed=5
+        if m.in_w:
+            m.y+=speed
+        if m.in_s:
+            m.y-=speed
+        if m.in_a:
+            m.x-=speed
+        if m.in_d:
+            m.x+=speed
 
 
 demo_level_str = '''
 #############
-#..P,p;;;;###
-#.#,#,###;###
+#..,,p;;;;###
+#.#P#,###;###
 #@#,#,###g.>#
 #..,#,;;;;###
-#.#,#,#.....#
-#.0p,p.S.*..#
+#.#,#p#.....#
+#.0,p..S.*..#
 #...........#
 #############
 '''
@@ -111,6 +272,7 @@ def char_to_cell(ch) -> Cell:
 
     if ch in "Pp":
         c = Cell('waypoint')
+        c.waypoint_char = str.lower(ch)
         return c
 
     if ch == '#':
@@ -135,7 +297,9 @@ def char_to_object(ch):
 
 def char_to_monster(ch):
     if ch == 'P':
-        return Monster('security')
+        m= Bot('security')
+        m.char = str.lower(ch)
+        return m
     if ch == 'g':
         return Monster('goat')
     if ch == 'S':
@@ -163,6 +327,12 @@ def load_level_str(level_str) -> Level:
                 level.monsters.append(m)
             if ch == '@':
                 level.entry_pos = ( TILE_W * x,  TILE_W * y)
+
+    for m in level.monsters:
+        if isinstance(m, Bot):
+            print("WP prepare for", m)
+            m.prepare_waypoints(level)
+
     return level
 
 
@@ -173,7 +343,7 @@ def remove_guidelines(pic):
     format = 'RGBA'
     pitch = rawimage.width * len(format)
     cpixels = pic.get_data(format, pitch)
-    print(type(cpixels))
+    #print(type(cpixels))
     colors={}
     pixels = bytearray(cpixels)
     for i in range(len(pixels)//4):
@@ -194,11 +364,13 @@ def remove_guidelines(pic):
 class PygletApp(pyglet.window.Window):
     def __init__(self, *args, **kwargs):
         pyglet.window.Window.__init__(self, *args, **kwargs)
+        self.keys = pyglet.window.key.KeyStateHandler()
+        self.push_handlers(self.keys)
         self.images = {}
 
     def update(self, dt):
         #print('update', dt)
-        pass
+        session.update()
     def run(self):
         self.fps_display = pyglet.window.FPSDisplay(self)
         #self.window = pyglet.window.Window()
@@ -256,9 +428,12 @@ class PygletApp(pyglet.window.Window):
 
 class App:
     def __init__(self):
+        global session
         self.sess = Session()
+        session = self.sess
         self.papp = PygletApp(width=1024,height=768)
         self.papp.sess = self.sess
+        self.sess.app = self.papp
     def run(self):
         self.papp.run()
 
