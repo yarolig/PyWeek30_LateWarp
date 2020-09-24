@@ -1,5 +1,7 @@
 import pyglet
 # import pymunk
+import random
+import copy
 
 TILE_W = 64
 def make_2d(f, w, h):
@@ -97,11 +99,15 @@ class Monster:
         self.x = 0
         self.y = 0
         self.facing = 'w'
-        self.hp = 0
+        self.hp = 10
         self.tilename=tilename
         self.char='?'
         self.fire_range = 0
+        self.name = tilename
+        self.attacking = False
         self.clear_input()
+    def __str__(self):
+        return "Mon(%d %d %d)" % (self.x, self.y, self.hp)
 
     def clear_input(self):
         self.in_w = False
@@ -128,8 +134,19 @@ class Monster:
     def ai(self):
         pass
 
-def manh_dist(A,B):
+
+
+class Goat(Monster):
+    def __init__(self, *args, **kwargs):
+        Monster.__init__(self, *args, **kwargs)
+        self.fire_range = 1
+        self.hp = 5
+
+def max_dist(A,B):
     return max(abs(A[0]-B[0]), abs(A[1]-B[1]))
+
+def manh_dist(A,B):
+    return abs(A[0]-B[0]) + abs(A[1]-B[1])
 
 
 def list_waypoints(level, ch):
@@ -145,21 +162,23 @@ class Bot(Monster):
         Monster.__init__(self, *args, **kwargs)
         self.waypoints=[]
         self.path=[]
+        self.hp = 30
         self.current_waypoint = 0
         self.fire_range = 2
 
+    def update_path(self):
+        self.current_waypoint = (self.current_waypoint + 1) % len(self.waypoints)
+        # print('cwp', self.current_waypoint, 'wps:', self.waypoints)
+        self.path = self.make_path(
+            ((self.x + TILE_W // 2) // TILE_W, (self.y + TILE_W // 2) // TILE_W),
+            self.waypoints[self.current_waypoint])
     def ai(self):
         #print('bot ai')
         tgt_x, tgt_y = self.x, self.y
         if not self.path and self.waypoints:
-
-            self.current_waypoint = (self.current_waypoint + 1) % len(self.waypoints)
-            #print('cwp', self.current_waypoint, 'wps:', self.waypoints)
-            self.path = self.make_path(
-                ((self.x+TILE_W//2)//TILE_W, (self.y+TILE_W//2)//TILE_W),
-                self.waypoints[self.current_waypoint])
-
+            self.update_path()
             #print('update path to', self.path)
+
         while self.path:
             path_tx, path_ty = self.path[0]
             path_x, path_y = path_tx*TILE_W, path_ty*TILE_W
@@ -317,7 +336,7 @@ class Player(Monster):
 class Object:
     x = 0
     y = 0
-    hp = 0
+    hp = 100
     name = ''
     pushable = False
     blocks_vision = False
@@ -333,13 +352,25 @@ class Box(Object):
     blocks_path = True
     blocks_path_finding = True
 
+class Warpback(Object):
+    name = 'warpback'
+    pickable = True
+
+
+class Laser(Object):
+    name = 'laser'
+    pickable = True
+
+class Battery(Object):
+    name = 'battery'
+    pickable = True
 
 
 class Decal:
     def __init__(self, name, x=0, y=0):
         self.x = x
         self.y = y
-        self.hp = 0
+        self.hp = 100
         self.name= name
 
 facing2dir = {
@@ -353,6 +384,7 @@ class Session:
     def __init__(self):
         self.loaded_levels = {}
         self.player = Player()
+        self.player_copy = copy.copy(self.player)
         self.reinit()
 
     def reinit(self, level_name=None):
@@ -363,6 +395,7 @@ class Session:
         self.loaded_levels[level_name] = self.level
         print('Level', level_name)
 
+        self.player = copy.copy(self.player_copy)
         self.player.x, self.player.y = self.level.entry_pos
 
     def load_level_by_name(self, lname):
@@ -388,16 +421,20 @@ class Session:
         tx, ty, c = level.get_named_entry_txyc(travel_from)
         self.player.x, self.player.y = tx*TILE_W, ty*TILE_W
         self.level = level
+        self.player_copy = copy.copy(self.player)
 
 
 
     def cells_in_range(self, tx, ty, r):
-        for i in range(tx-r, tx+r):
-            for j in range(ty-r, ty+r):
+        for i in range(tx-r-1, tx+r+1):
+            for j in range(ty-r-1, ty+r+1):
+                if abs(tx - i) + abs(ty - j) > r:
+                    #print('r:', tx, i, ty,  abs(tx - i) + abs(ty - j), r)
+                    continue
                 if 0 <= i < len(self.level.m[0]) and 0 <= j < len(self.level.m):
                     yield i, j, self.level.m[j][i]
 
-    def xy2ctxy(self, x, y):
+    def xy2ctxy(self, x, y) -> (int, int, Cell):
         tx = (x + TILE_W // 2) // TILE_W
         ty = (y + TILE_W // 2) // TILE_W
         c = None
@@ -405,10 +442,30 @@ class Session:
             c = self.level.m[ty][tx]
         return tx, ty, c
 
-    def auto_attack(self, m):
 
+    def can_see(self, ssx, ssy, tsx, tsy):
+        tx, ty, c = self.xy2ctxy((ssx+tsx) // 2 * TILE_W,
+                                 (ssy+tsy) // 2 * TILE_W)
+        if manh_dist((ssx,ssy), (tsx,tsy)) <= 1:
+            return True
+        if c and c.passable and c.vacant:
+            return True
+        return False
+
+    def add_ray(self, src, tgt):
         pass
 
+    def auto_attack(self, m: Monster):
+        tx, ty, c = self.xy2ctxy(m.x, m.y)
+        for cx,cy,c in self.cells_in_range(tx, ty, m.fire_range):
+            if not self.can_see(tx, ty, cx,cy):
+                continue
+            u = c.used_by
+            if u and isinstance(u, Monster) and m.name != u.name:
+                #print('Att', m, u)
+                m.attacking = True
+                self.add_ray((tx, ty), (cx, cy))
+                u.hp -= 1
     
     def kick(self, m):
         #print ('kick', m, m.facing)
@@ -464,6 +521,18 @@ class Session:
     def m_phy(self, m):
         speed=8
         dx = dy = 0
+
+        if m.hp <= 0:
+            mtx, mty, mc = self.xy2ctxy(m.x, m.y)
+            if mc.name == 'floor':
+                mc.name = 'ashes'
+            if m is not self.player:
+                self.level.monsters.remove(m)
+            return
+
+        if m.fire_range > 0:
+            self.auto_attack(m)
+
         if m.in_w:
             dy+=speed
             m.facing = 'w'
@@ -501,9 +570,10 @@ class Session:
             if not cell:
                 return False
             if c.used_by and isinstance(c.used_by, Object):
-                return True
+                return c.used_by.pushable
             return False
 
+        passed = False
         tx, ty, c = self.xy2ctxy(m.x + dx, m.y)
         mx, my, mc = self.xy2ctxy(m.x, m.y)
         if m is self.player and is_travel_move(mc, c):
@@ -512,6 +582,7 @@ class Session:
 
         if can_pass(c):
             m.x += dx
+            if dx: passed = True
         elif can_kick(c):
             self.kick(m)
 
@@ -522,8 +593,13 @@ class Session:
 
         if can_pass(c):
             m.y += dy
+            if dy: passed = True
         elif can_kick(c):
             self.kick(m)
+
+        if not passed and isinstance(m, Bot):
+            print('update_path')
+            m.update_path()
 
 
 
@@ -551,22 +627,21 @@ class EntranceLevel(LevelDef):
 ####################
 ########1###########
 ########.###########
-######.....#########
-##...#..@..#########
+######&^...#########
+##...#.@...#########
 #2.00.........0.####
 ##...#.....###...3##
+######.....#########
+######.....#########
+######.....#########
 ####################
-####################
-####################
-####################
-
 '''
 
 class DemoLevel(LevelDef):
     name = 'demo'
-    transitions = 'entrance  laserroom'.split()
+    transitions = 'entrance laserroom logistics'.split()
     data = '''
-..############>#....
+..############3#....
 ..#..P,,p;;;.#.#....
 ###.#,##,##.g#.#....
 2...#,##,##....#....
@@ -601,21 +676,21 @@ class WarpStorageLevel(LevelDef):
 
 class BoringLevel(LevelDef):
     name = 'boring'
-    transitions = ''.split()
+    transitions = 'logistics'.split()
     data = '''
 ####################
 ##p#####..#p#####P##
 #..................#
 ########..#.######.#
 ##..........#####.0#
->@.0000#..#.##000..#
-##.0.0.#....##000..#
+1@.0000#..#.##0.0..#
+##.0.0.#....##0.0..#
 ##...0.#..#.##....g#
-##.0.0.#.....0.....>
+##.0.0.#.....0.....?
 ##..#######.##..g..#
 ##.g....g...########
 ##....g...g.########
-#######>############
+#######?############
 '''
 
 
@@ -644,17 +719,17 @@ class LaserLevel(LevelDef):
     transitions = 'demo laserroom2'.split()
     data = '''
 ####################
-#..............#.s.#
-#..#..#00#s.#......#
+#..............#..s#
+#..#.0#00#0s#......#
 #..????..????..#####
-#..#..#p.#..#......#
-#p.............#P..#
+#..#..#p.#..#.....P#
+#p.............#...#
 ####...######..#####
 #..................#
-#.p.......S....#..@1
-#.s....##..#...#...#
-#.......g..#.......#
-#######2############
+#p........S....#..@1
+#s.....##..#...#...#
+#..........#.......#
+######g2g###########
 '''
 
 
@@ -681,22 +756,40 @@ class Laser2Level(LevelDef):
 # Communication room
 class CommroomLevel(LevelDef):
     name = 'comm'
-    transitions = ''.split()
+    transitions = 'logistics'.split()
     data = '''
 ####################
 #.P#............#..#
 #.................p#
-####0.###..###..####
+####00###..###..####
 #..#..#......#.....#
-#?.g..............@1
+#&.g..............@1
 #..#...............#
 ####..#......#.....#
-####..###..###..####
+####00###..###..####
 #..................#
 #.p#............#.p#
 ####################
 '''
+
 # Logistics
+class LogisticsLevel(LevelDef):
+    name = 'logistics'
+    transitions = 'demo comm boring'.split()
+    data = '''
+####################
+#.sp.##.sp.##..sp..#
+2..0......0##.0....3
+#..0.##..0..C....0.#
+##c####....####c####
+#.....##c######.####
+#P.00.##.##.##...0.#
+#s...........#..0..#
+###c###..###.c..Sp.#
+#.0........#########
+#s..p.#..@.#########
+#########1##########
+'''
 
 # Spaceport
 
@@ -718,18 +811,21 @@ def char_to_cell(ch) -> Cell:
         c.passable = False
         return c
 
-    if ch in ".,;:\'\"@g0":
+    if ch in ".,;:\'\"@g0WL":
         c = Cell('floor')
+        return c
+
+    if ch == '^':
+        c = Cell('warpgate')
+        return c
+
+    if ch == '&':
+        c = Cell('computer')
         return c
 
     if ch in "PpCcSs":
         c = Cell('waypoint')
         c.waypoint_char = str.lower(ch)
-        return c
-
-    if ch == '#':
-        c = Cell('wall')
-        c.passable = False
         return c
 
     if ch in '123456789':
@@ -745,8 +841,12 @@ def char_to_cell(ch) -> Cell:
 def char_to_object(ch):
     if ch == '0':
         return Box()
-    #if ch == '*':
-    #    return Object('light')
+    if ch == 'W':
+        return Warpback()
+    if ch == 'L':
+        return Laser()
+    if ch == 'B':
+        return Battery()
 
 
 def char_to_monster(ch):
@@ -754,10 +854,13 @@ def char_to_monster(ch):
         m= Bot('security')
         m.char = str.lower(ch)
         return m
+
     if ch == 'g':
-        return Monster('goat')
-    if ch == 't':
+        return Goat('goat')
+
+    if ch in 'traTRA':
         return Monster('stranger')
+
 
 
 def load_level(level_class) -> Level:
@@ -829,9 +932,11 @@ def remove_guidelines(pic):
 class PygletApp(pyglet.window.Window):
     def __init__(self, *args, **kwargs):
         pyglet.window.Window.__init__(self, *args, **kwargs)
+
         self.keys = pyglet.window.key.KeyStateHandler()
         self.push_handlers(self.keys)
         self.images = {}
+        self.frameno = 0
 
     def update(self, dt):
         #print('update', dt)
@@ -889,6 +994,7 @@ class PygletApp(pyglet.window.Window):
         pass
 
     def on_draw(self):
+        self.frameno += 1
         #print('draw')
         self.clear()
 
@@ -898,9 +1004,16 @@ class PygletApp(pyglet.window.Window):
             self.draw_sprite(o.name, o.x, o.y)
 
         for m in session.level.monsters:
-            self.draw_sprite(m.tilename, m.x, m.y)
+            asuf = ''
+            if m.attacking and (self.frameno % 3 == 1):
+                asuf = '_fire'
+            self.draw_sprite(m.tilename + asuf, m.x, m.y)
+            m.attacking = False
         p=session.player
-        self.draw_sprite('player', p.x, p.y)
+        if p.hp >=0:
+            self.draw_sprite('player', p.x, p.y)
+        else:
+            self.draw_sprite('warp_anim%d' % (self.frameno // 5 % 3 + 1), p.x, p.y)
         self.fps_display.draw()
         self.flip()
 
@@ -920,6 +1033,11 @@ class App:
         self.papp = PygletApp(width=1280,height=800)
         self.papp.sess = self.sess
         self.sess.app = self.papp
+        self.music = pyglet.media.Player()
+        self.track = pyglet.media.load('data/music/hermetico-metro.ogg')
+        self.music.queue(self.track)
+        self.music.play()
+
     def run(self):
         self.papp.run()
 
