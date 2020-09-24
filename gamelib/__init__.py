@@ -62,18 +62,30 @@ class Cell:
         self.vacant = True
         self.used_by = None
         self.waypoint_char = '\0'
+        self.travel_to = ''
+
     def __str__(self):
         return "Cell(%s)" % (self.name)
 
 
 class Level:
     def __init__(self, w=10, h=10):
+        self.level_name = ''
         self.tile_width = 64
         self.m = make_2d(lambda x,y: Cell('floor'), w, h)
         self.objects = []
         self.monsters = []
         self.decals = []
         self.entry_pos = (0,0)
+
+    def get_named_entry_txyc(self, entry_name):
+        for x, y, c in enum_2d(self.m):
+            if c.travel_to:
+                print ('travel_to', c, c.travel_to)
+            if c.travel_to == entry_name:
+                return x,y,c
+        else:
+            raise Exception('no entrance from %s in %s' % (entry_name, 'level'))
 
         #for x, y, c in enum_2d(self.m, lambda: print('\n')):
         #    #print(x, y, c)
@@ -88,6 +100,7 @@ class Monster:
         self.hp = 0
         self.tilename=tilename
         self.char='?'
+        self.fire_range = 0
         self.clear_input()
 
     def clear_input(self):
@@ -133,6 +146,7 @@ class Bot(Monster):
         self.waypoints=[]
         self.path=[]
         self.current_waypoint = 0
+        self.fire_range = 2
 
     def ai(self):
         #print('bot ai')
@@ -301,11 +315,25 @@ class Player(Monster):
 
 
 class Object:
-    def __init__(self, name, x=0, y=0):
-        self.x = x
-        self.y = y
-        self.hp = 0
-        self.name= name
+    x = 0
+    y = 0
+    hp = 0
+    name = ''
+    pushable = False
+    blocks_vision = False
+    blocks_path = False
+    blocks_path_finding = False
+    pickable = False
+
+
+class Box(Object):
+    name = 'box'
+    pushable = True
+    blocks_vision = True
+    blocks_path = True
+    blocks_path_finding = True
+
+
 
 class Decal:
     def __init__(self, name, x=0, y=0):
@@ -323,26 +351,51 @@ facing2dir = {
 
 class Session:
     def __init__(self):
-        #self.level = load_level_str(demo_level_str)
-        #self.level = load_level_str(warp_storage_level_str)
-        #self.level = load_level_str(boring_level_str)
-        #self.app = None
-        #self.level.objects.append(Object('box', TILE_W*5, TILE_W*4))
+        self.loaded_levels = {}
+        self.player = Player()
         self.reinit()
 
     def reinit(self, level_name=None):
         if not level_name:
             level_name = 'entrance'
         self.level_name = level_name
-
+        self.level = self.load_level_by_name(level_name)
+        self.loaded_levels[level_name] = self.level
         print('Level', level_name)
-        for i in all_levels:
-            if i.name == level_name:
-                self.level = load_level_str(i.data)
 
-        self.player = Player()
         self.player.x, self.player.y = self.level.entry_pos
 
+    def load_level_by_name(self, lname):
+        for i in all_levels:
+            if i.name == lname:
+                return load_level(i)
+        else:
+            print('Error: no such level', lname)
+            return None
+
+    def travel(self, dest):
+        travel_from = self.level_name
+        print('travel to', dest, 'from', travel_from)
+        if dest not in self.loaded_levels:
+            level = self.load_level_by_name(dest)
+
+            if not level:
+                print("Can't load level", dest)
+                return
+            self.loaded_levels[dest] = level
+        level = self.loaded_levels[dest]
+        self.level_name = dest
+        tx, ty, c = level.get_named_entry_txyc(travel_from)
+        self.player.x, self.player.y = tx*TILE_W, ty*TILE_W
+        self.level = level
+
+
+
+    def cells_in_range(self, tx, ty, r):
+        for i in range(tx-r, tx+r):
+            for j in range(ty-r, ty+r):
+                if 0 <= i < len(self.level.m[0]) and 0 <= j < len(self.level.m):
+                    yield i, j, self.level.m[j][i]
 
     def xy2ctxy(self, x, y):
         tx = (x + TILE_W // 2) // TILE_W
@@ -352,14 +405,18 @@ class Session:
             c = self.level.m[ty][tx]
         return tx, ty, c
 
+    def auto_attack(self, m):
+
+        pass
+
     
     def kick(self, m):
-        print ('kick', m, m.facing)
+        #print ('kick', m, m.facing)
         mtx, mty, mc = self.xy2ctxy(m.x, m.y)
         dx, dy = facing2dir[m.facing]
         stx, sty, sc = self.xy2ctxy(m.x+dx*TILE_W, m.y+dy*TILE_W)
         dtx, dty, tc = self.xy2ctxy(m.x+2*dx*TILE_W, m.y+2*dy*TILE_W)
-        print(mc, sc, tc)
+        #print(mc, sc, tc)
         if not sc:
             return
         if not mc:
@@ -422,7 +479,12 @@ class Session:
         #if m.in_kick:
         #    self.kick(m)
 
-
+        def is_travel_move(oldcell, newcell):
+            if not newcell:
+                return
+            if oldcell.travel_to != newcell.travel_to and newcell.travel_to:
+                return True
+            return False
 
         def can_pass(cell):
             if not cell:
@@ -443,13 +505,22 @@ class Session:
             return False
 
         tx, ty, c = self.xy2ctxy(m.x + dx, m.y)
+        mx, my, mc = self.xy2ctxy(m.x, m.y)
+        if m is self.player and is_travel_move(mc, c):
+            self.travel(c.travel_to)
+            return
+
         if can_pass(c):
             m.x += dx
         elif can_kick(c):
             self.kick(m)
 
         tx, ty, c = self.xy2ctxy(m.x, m.y + dy)
-        if  can_pass(c):
+        if m is self.player and is_travel_move(mc, c):
+            self.travel(c.travel_to)
+            return
+
+        if can_pass(c):
             m.y += dy
         elif can_kick(c):
             self.kick(m)
@@ -474,12 +545,12 @@ class LevelDef:
 
 class EntranceLevel(LevelDef):
     name = 'entrance'
-    transitions = ''.split()
+    transitions = 'demo laserroom2 warp_storage'.split()
     data = '''
 ####################
 ####################
 ########1###########
-########+###########
+########.###########
 ######.....#########
 ##...#..@..#########
 #2.00.........0.####
@@ -493,14 +564,14 @@ class EntranceLevel(LevelDef):
 
 class DemoLevel(LevelDef):
     name = 'demo'
-    transitions = ''.split()
+    transitions = 'entrance  laserroom'.split()
     data = '''
-..############2#....
-..#..P,,p;;;##.#....
-###.#,##,##.##.#....
-3.g.#,##,##.g..#....
-###..,##,;;;####....
-..#.#,##p#....0#....
+..############>#....
+..#..P,,p;;;.#.#....
+###.#,##,##.g#.#....
+2...#,##,##....#....
+##g..,##,;;;####....
+.##.#,##p#....0#....
 ..#.#,##,.g..g0#....
 ..#..,##,#.....#....
 ..#.0p,,,#.....#....
@@ -511,7 +582,7 @@ class DemoLevel(LevelDef):
 
 class WarpStorageLevel(LevelDef):
     name = 'warp_storage'
-    transitions = ''.split()
+    transitions = 'entrance'.split()
     data = '''
 ####################
 #####..#########..##
@@ -557,7 +628,7 @@ class BigroomLevel(LevelDef):
 #..................#
 #..................#
 #..................#
-#@.................#
+#........@.........#
 #..................#
 #..................#
 #..................#
@@ -570,7 +641,7 @@ class BigroomLevel(LevelDef):
 # Laser cutting
 class LaserLevel(LevelDef):
     name = 'laserroom'
-    transitions = ''.split()
+    transitions = 'demo laserroom2'.split()
     data = '''
 ####################
 #..............#.s.#
@@ -586,6 +657,25 @@ class LaserLevel(LevelDef):
 #######2############
 '''
 
+
+# Laser cutting2
+class Laser2Level(LevelDef):
+    name = 'laserroom2'
+    transitions = 'laserroom entrance'.split()
+    data = '''
+####################
+####################
+####################
+########1###########
+####....@.....######
+####...............2
+####..*.......######
+####..........######
+#############.######
+#######........#####
+#######..g#..g.#####
+####################
+'''
 # Compact battery production
 
 # Communication room
@@ -596,12 +686,12 @@ class CommroomLevel(LevelDef):
 ####################
 #.P#............#..#
 #.................p#
-####0...........####
+####0.###..###..####
+#..#..#......#.....#
+#?.g..............@1
 #..#...............#
-#?.g...............#
-#..#...............#
-####...............#
-####............####
+####..#......#.....#
+####..###..###..####
 #..................#
 #.p#............#.p#
 ####################
@@ -642,9 +732,10 @@ def char_to_cell(ch) -> Cell:
         c.passable = False
         return c
 
-    if ch in '>123456789':
+    if ch in '123456789':
         c = Cell('door')
-        c.passable = False
+        c.passable = True
+        c.waypoint_char = ch
         return c
 
     c = Cell('qm')
@@ -653,9 +744,10 @@ def char_to_cell(ch) -> Cell:
 
 def char_to_object(ch):
     if ch == '0':
-        return Object('box')
-    if ch == '*':
-        return Object('light')
+        return Box()
+    #if ch == '*':
+    #    return Object('light')
+
 
 def char_to_monster(ch):
     if ch in 'PCS':
@@ -668,16 +760,26 @@ def char_to_monster(ch):
         return Monster('stranger')
 
 
-def load_level_str(level_str) -> Level:
+def load_level(level_class) -> Level:
+    level_str = level_class.data
     lines = [s for s in level_str.split('\n') if s]
     lines.reverse()
     level_width = max([len(line) for line in lines])
     level_height = len(lines)
     level = Level(level_width, level_height)
+    level.level_name = level_class.name
+
     for y in range(level_height):
         for x in range(len(lines[y])):
             ch = lines[y][x]
-            level.m[y][x] = char_to_cell(ch)
+            cl = char_to_cell(ch)
+            level.m[y][x] = cl
+            if cl.name == 'door':
+                n = int(cl.waypoint_char) - 1
+                if n >= len(level_class.transitions):
+                    raise Exception('no transition to %s in %s' % (cl.waypoint_char, level_class.name))
+                cl.travel_to = level_class.transitions[n]
+
             o = char_to_object(ch)
             if o:
                 o.x = TILE_W * x
