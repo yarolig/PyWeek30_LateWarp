@@ -60,7 +60,10 @@ class Cell:
         self.name=name
         self.passable = True
         self.vacant = True
+        self.used_by = None
         self.waypoint_char = '\0'
+    def __str__(self):
+        return "Cell(%s)" % (self.name)
 
 
 class Level:
@@ -80,6 +83,7 @@ class Monster:
     def __init__(self, tilename=''):
         self.x = 0
         self.y = 0
+        self.facing = 'w'
         self.hp = 0
         self.tilename=tilename
         self.char='?'
@@ -91,6 +95,7 @@ class Monster:
         self.in_a = False
         self.in_d = False
         self.in_attack = False
+        self.in_kick = False
         self.tgt = (self.x, self.y)
 
     def move_to_tgt(self):
@@ -117,6 +122,7 @@ def list_waypoints(level, ch):
     for x,y,c in enum_2d(level.m):
         if c.waypoint_char == ch:
             result.append((x,y))
+    print('WP:', result)
     return result
 
 class Bot(Monster):
@@ -130,7 +136,9 @@ class Bot(Monster):
         #print('bot ai')
         tgt_x, tgt_y = self.x, self.y
         if not self.path and self.waypoints:
+
             self.current_waypoint = (self.current_waypoint + 1) % len(self.waypoints)
+            print('cwp', self.current_waypoint, 'wps:', self.waypoints)
             self.path = self.make_path(
                 ((self.x+TILE_W//2)//TILE_W, (self.y+TILE_W//2)//TILE_W),
                 self.waypoints[self.current_waypoint])
@@ -163,14 +171,15 @@ class Bot(Monster):
         sx, sy = src
         tx, ty = tgt
         if (sx,sy) == (tx,ty):
-            print('Warning: bad make_path call')
+            print('Warning: bad make_path call', src, tgt)
+            #raise Exception()
             return [(tx, ty)]
 
-        print('s:',sx,sy,'t:',tx,ty)
+        print('make_path','s:',sx,sy,'t:',tx,ty)
         if not level:
             level = session.level
-        level_w = len(level.m)
-        level_h = len(level.m[0])
+        level_w = len(level.m[0])
+        level_h = len(level.m)
         def passable_score(c):
             if not c.passable:
                 return 1000
@@ -180,7 +189,7 @@ class Bot(Monster):
                 return 999
 
         cost=make_2d(lambda x,y: passable_score(level.m[x][y]),
-                     level_w, level_h)
+                     level_h, level_w)
         def draw_cost():
             for y, x, c in enum_2d_tm(cost, lambda:print()):
                 if c == 1000:
@@ -194,21 +203,21 @@ class Bot(Monster):
                 else:
                     print('Z', end='')
 
-        def neighbours(x, y):
+        def neighbours(xx, yy):
             dd = [(1,0), (0,1), (-1,0), (0,-1)]
             for dx, dy in dd:
-                nx = x + dx
-                ny = y + dy
-                if 0 <= nx < level_w and 0 <= ny < level_h:
-                    yield (nx, ny)
+                nnx = xx + dx
+                nny = yy + dy
+                if 0 <= nnx < level_w and 0 <= nny < level_h:
+                    yield (nnx, nny)
         pts = [src]
 
         cost[sx][sy] = 0
-        cost[tx][ty] = 20
-        draw_cost()
+        #cost[tx][ty] = 60
+        #draw_cost()
 
         current_cost = 0
-        for r in range(1,20):
+        for r in range(1,50):
             newpts = []
             for p in pts:
                 px, py = p
@@ -217,6 +226,8 @@ class Bot(Monster):
                     if nc < 1000 and nc > r:
                         cost[nx][ny] = r
                         newpts.append((nx, ny))
+                else:
+                    print('warning: no neigh for',px,py,'lwh:',level_w,level_h)
             pts = newpts
         result = []
 
@@ -243,6 +254,9 @@ class Bot(Monster):
                 if (x, y) == (sx, sy):
                     result.insert(0, (x, y))
                     break
+        else:
+            print('warning: no path')
+            draw_cost()
         #result.reverse()
         return result
 
@@ -260,7 +274,7 @@ class Bot(Monster):
             lwx, lwy = w
             self.waypoints.append(w)
 
-        print('WP:', self.waypoints)
+        print('sorted WP:', self.waypoints)
 
 
 class Player(Monster):
@@ -277,6 +291,8 @@ class Player(Monster):
             self.in_a = True
         if session.app.keys[pyglet.window.key.D]:
             self.in_d = True
+        if session.app.keys[pyglet.window.key.SPACE]:
+            self.in_kick = True
 
 
 class Object:
@@ -287,9 +303,18 @@ class Object:
         self.name= name
 
 
+facing2dir = {
+'w': (0, 1),
+'s': (0, -1),
+'a': (-1, 0),
+'d': (1, 0),
+}
+
 class Session:
     def __init__(self):
-        self.level=load_level_str(demo_level_str)
+        #self.level = load_level_str(demo_level_str)
+        #self.level = load_level_str(warp_storage_level_str)
+        self.level = load_level_str(boring_level_str)
         self.player = Player()
         self.player.x,self.player.y = self.level.entry_pos
         #self.app = None
@@ -303,20 +328,51 @@ class Session:
             c = self.level.m[ty][tx]
         return tx, ty, c
 
+    
+    def kick(self, m):
+        print ('kick', m, m.facing)
+        mtx, mty, mc = self.xy2ctxy(m.x, m.y)
+        dx, dy = facing2dir[m.facing]
+        stx, sty, sc = self.xy2ctxy(m.x+dx*TILE_W, m.y+dy*TILE_W)
+        dtx, dty, tc = self.xy2ctxy(m.x+2*dx*TILE_W, m.y+2*dy*TILE_W)
+        print(mc, sc, tc)
+        if not sc:
+            return
+        if not mc:
+            return
+        if not tc:
+            return
+
+
+        if not tc.passable:
+            return
+        if not tc.vacant:
+            return
+        print('sc.ub', sc.used_by)
+        if isinstance(sc.used_by, Object):
+            o = sc.used_by
+            o.x = dtx*TILE_W
+            o.y = dty*TILE_W
+
+        
     def update(self):
         self.player.ai()
         for x, y, c in enum_2d(self.level.m):
             c.vacant = True
+            c.used_by = None
 
-        def vm(m):
+        def vx(m):
             tx = (m.x + TILE_W//2) // TILE_W
             ty = (m.y + TILE_W // 2) // TILE_W
-            if 0 <= tx < len(self.level.m) and 0 <= ty < len(self.level.m[0]):
+            if 0 <= tx < len(self.level.m[0]) and 0 <= ty < len(self.level.m):
                 self.level.m[ty][tx].vacant = False
+                self.level.m[ty][tx].used_by = m
 
         for m in self.level.monsters:
-            vm(m)
-        vm(self.player)
+            vx(m)
+        vx(self.player)
+        for o in self.level.objects:
+            vx(o)
 
         for m in self.level.monsters:
             m.ai()
@@ -325,30 +381,46 @@ class Session:
             self.m_phy(m)
 
     def m_phy(self, m):
-        speed=5
+        speed=8
         dx = dy = 0
         if m.in_w:
             dy+=speed
+            m.facing = 'w'
         if m.in_s:
             dy-=speed
+            m.facing = 's'
         if m.in_a:
             dx-=speed
+            m.facing = 'a'
         if m.in_d:
             dx+=speed
+            m.facing = 'd'
+        if m.in_kick:
+            self.kick(m)
 
         tx, ty, c = self.xy2ctxy(m.x+dx, m.y+dy)
-        if c and c.passable:
+
+        def can_pass(cell):
+            if not cell:
+                return False
+            if not c.passable:
+                return False
+            if not c.vacant:
+                return c.used_by is m
+            return True
+
+        if can_pass(c):
             m.x+=dx
             m.y+=dy
             return
 
         tx, ty, c = self.xy2ctxy(m.x + dx, m.y)
-        if c and c.passable:
+        if can_pass(c):
             m.x += dx
             return
 
         tx, ty, c = self.xy2ctxy(m.x, m.y + dy)
-        if c and c.passable:
+        if  can_pass(c):
             m.y += dy
             return
 
@@ -366,6 +438,86 @@ demo_level_str = '''
 #............#
 ##############
 '''
+
+
+
+
+
+
+# Sunrise Warp Travel
+'''
+'''
+
+
+
+# Entrance
+entrance_level_str = '''
+############>###################
+############+###################
+#######..@.......###############
+##>.00..............>###########
+#######..........###############
+#######..........###############
+################################
+'''
+
+
+
+# Warp storage
+warp_storage_level_str = '''
+####################
+#####..#########..##
+#00.0..0.......0..##
+.@..#..#####.####.##
+#..00#######.####.##
+##0######.00...##.##
+#..0#####00.00.##..#
+#..0...##.0..0.##WW#
+#.0.#.....0.0.0#####
+####################
+....................
+....................
+'''
+
+
+# Some boring level
+boring_level_str = '''
+####################
+##p########p######P#
+#..................#
+########..#.######.#
+##..........######0#
+>@.0000#..#.##.....#
+##.0.0.#....##.....#
+##...0.#..#.##.g..g#
+##.0.0.#.....0.....>
+##..#######.##..g..#
+##....g..g..##....g#
+##....g...g.##.....#
+#######>############
+'''
+
+# Laser cutting
+
+# Compact battery production
+
+# Communication room
+
+# Logistics
+
+# Spaceport
+
+# Fuel storage
+
+# Environment control
+
+# Artifical gravity engines
+
+# Robot maintenance
+
+# Cybergoat production
+
+
 
 def char_to_cell(ch) -> Cell:
     if ch == '#':
@@ -415,6 +567,7 @@ def char_to_monster(ch):
 
 def load_level_str(level_str) -> Level:
     lines = [s for s in level_str.split('\n') if s]
+    lines.reverse()
     level_width = max([len(line) for line in lines])
     level_height = len(lines)
     level = Level(level_width, level_height)
@@ -538,7 +691,7 @@ class App:
         global session
         self.sess = Session()
         session = self.sess
-        self.papp = PygletApp(width=1024,height=768)
+        self.papp = PygletApp(width=1280,height=800)
         self.papp.sess = self.sess
         self.sess.app = self.papp
     def run(self):
