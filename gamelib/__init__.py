@@ -395,10 +395,10 @@ class Session:
         if m.in_d:
             dx+=speed
             m.facing = 'd'
-        if m.in_kick:
-            self.kick(m)
+        #if m.in_kick:
+        #    self.kick(m)
 
-        tx, ty, c = self.xy2ctxy(m.x+dx, m.y+dy)
+
 
         def can_pass(cell):
             if not cell:
@@ -409,20 +409,24 @@ class Session:
                 return c.used_by is m
             return True
 
-        if can_pass(c):
-            m.x+=dx
-            m.y+=dy
-            return
+        def can_kick(cell):
+            if not cell:
+                return False
+            if c.used_by and isinstance(c.used_by, Object):
+                return True
+            return False
 
         tx, ty, c = self.xy2ctxy(m.x + dx, m.y)
         if can_pass(c):
             m.x += dx
-            return
+        elif can_kick(c):
+            self.kick(m)
 
         tx, ty, c = self.xy2ctxy(m.x, m.y + dy)
         if  can_pass(c):
             m.y += dy
-            return
+        elif can_kick(c):
+            self.kick(m)
 
 
 demo_level_str = '''
