@@ -72,6 +72,7 @@ class Level:
         self.m = make_2d(lambda x,y: Cell('floor'), w, h)
         self.objects = []
         self.monsters = []
+        self.decals = []
         self.entry_pos = (0,0)
 
         #for x, y, c in enum_2d(self.m, lambda: print('\n')):
@@ -96,6 +97,7 @@ class Monster:
         self.in_d = False
         self.in_attack = False
         self.in_kick = False
+        self.in_walk = False
         self.tgt = (self.x, self.y)
 
     def move_to_tgt(self):
@@ -122,7 +124,7 @@ def list_waypoints(level, ch):
     for x,y,c in enum_2d(level.m):
         if c.waypoint_char == ch:
             result.append((x,y))
-    print('WP:', result)
+    #print('WP:', result)
     return result
 
 class Bot(Monster):
@@ -138,19 +140,19 @@ class Bot(Monster):
         if not self.path and self.waypoints:
 
             self.current_waypoint = (self.current_waypoint + 1) % len(self.waypoints)
-            print('cwp', self.current_waypoint, 'wps:', self.waypoints)
+            #print('cwp', self.current_waypoint, 'wps:', self.waypoints)
             self.path = self.make_path(
                 ((self.x+TILE_W//2)//TILE_W, (self.y+TILE_W//2)//TILE_W),
                 self.waypoints[self.current_waypoint])
 
-            print('update path to', self.path)
+            #print('update path to', self.path)
         while self.path:
             path_tx, path_ty = self.path[0]
             path_x, path_y = path_tx*TILE_W, path_ty*TILE_W
             if manh_dist((self.x, self.y), (path_x, path_y)) < 10:
                 self.path = self.path[1:]
                 #print('dist:', )
-                print('reduce path to', self.path)
+                #print('reduce path to', self.path)
             else:
                 tgt_x, tgt_y = path_x, path_y
                 #print('set tgt to', path_x, path_y, ' pos:', self.x, self.y)
@@ -171,11 +173,11 @@ class Bot(Monster):
         sx, sy = src
         tx, ty = tgt
         if (sx,sy) == (tx,ty):
-            print('Warning: bad make_path call', src, tgt)
+            #print('Warning: bad make_path call', src, tgt)
             #raise Exception()
             return [(tx, ty)]
 
-        print('make_path','s:',sx,sy,'t:',tx,ty)
+        #print('make_path','s:',sx,sy,'t:',tx,ty)
         if not level:
             level = session.level
         level_w = len(level.m[0])
@@ -227,11 +229,12 @@ class Bot(Monster):
                         cost[nx][ny] = r
                         newpts.append((nx, ny))
                 else:
-                    print('warning: no neigh for',px,py,'lwh:',level_w,level_h)
+                    #print('warning: no neigh for',px,py,'lwh:',level_w,level_h)
+                    pass
             pts = newpts
         result = []
 
-        draw_cost()
+        #draw_cost()
         if cost[tx][ty] < 999:
             x = tx
             y = ty
@@ -255,7 +258,7 @@ class Bot(Monster):
                     result.insert(0, (x, y))
                     break
         else:
-            print('warning: no path')
+            #print('warning: no path')
             draw_cost()
         #result.reverse()
         return result
@@ -274,7 +277,7 @@ class Bot(Monster):
             lwx, lwy = w
             self.waypoints.append(w)
 
-        print('sorted WP:', self.waypoints)
+        #print('sorted WP:', self.waypoints)
 
 
 class Player(Monster):
@@ -283,16 +286,18 @@ class Player(Monster):
 
     def ai(self):
         self.clear_input()
-        if session.app.keys[pyglet.window.key.W]:
+        if session.app.keys[pyglet.window.key.W] or session.app.keys[pyglet.window.key.UP]:
             self.in_w = True
-        if session.app.keys[pyglet.window.key.S]:
+        if session.app.keys[pyglet.window.key.S] or session.app.keys[pyglet.window.key.DOWN]:
             self.in_s = True
-        if session.app.keys[pyglet.window.key.A]:
+        if session.app.keys[pyglet.window.key.A] or session.app.keys[pyglet.window.key.LEFT]:
             self.in_a = True
-        if session.app.keys[pyglet.window.key.D]:
+        if session.app.keys[pyglet.window.key.D] or session.app.keys[pyglet.window.key.RIGHT]:
             self.in_d = True
         if session.app.keys[pyglet.window.key.SPACE]:
             self.in_kick = True
+        if session.app.keys[pyglet.window.key.LSHIFT]  or session.app.keys[pyglet.window.key.RSHIFT]:
+            self.in_walk = True
 
 
 class Object:
@@ -302,6 +307,12 @@ class Object:
         self.hp = 0
         self.name= name
 
+class Decal:
+    def __init__(self, name, x=0, y=0):
+        self.x = x
+        self.y = y
+        self.hp = 0
+        self.name= name
 
 facing2dir = {
 'w': (0, 1),
@@ -314,11 +325,24 @@ class Session:
     def __init__(self):
         #self.level = load_level_str(demo_level_str)
         #self.level = load_level_str(warp_storage_level_str)
-        self.level = load_level_str(boring_level_str)
-        self.player = Player()
-        self.player.x,self.player.y = self.level.entry_pos
+        #self.level = load_level_str(boring_level_str)
         #self.app = None
         #self.level.objects.append(Object('box', TILE_W*5, TILE_W*4))
+        self.reinit()
+
+    def reinit(self, level_name=None):
+        if not level_name:
+            level_name = 'entrance'
+        self.level_name = level_name
+
+        print('Level', level_name)
+        for i in all_levels:
+            if i.name == level_name:
+                self.level = load_level_str(i.data)
+
+        self.player = Player()
+        self.player.x, self.player.y = self.level.entry_pos
+
 
     def xy2ctxy(self, x, y):
         tx = (x + TILE_W // 2) // TILE_W
@@ -410,6 +434,8 @@ class Session:
             return True
 
         def can_kick(cell):
+            if session.player.in_walk:
+                return False
             if not cell:
                 return False
             if c.used_by and isinstance(c.used_by, Object):
@@ -429,19 +455,7 @@ class Session:
             self.kick(m)
 
 
-demo_level_str = '''
-##############
-#..P,,p;;;####
-#.#,##,##.####
-#@#,##,##.g.>#
-#..,##,;;;####
-#.#,##p#.....#
-#..,##,......#
-#..,##,......#
-#.0p,,,.S.*..#
-#............#
-##############
-'''
+
 
 
 
@@ -453,30 +467,60 @@ demo_level_str = '''
 '''
 
 
+class LevelDef:
+    name = ''
+    data = ''
+    transitions = ''.split()
 
-# Entrance
-entrance_level_str = '''
-############>###################
-############+###################
-#######..@.......###############
-##>.00..............>###########
-#######..........###############
-#######..........###############
-################################
+class EntranceLevel(LevelDef):
+    name = 'entrance'
+    transitions = ''.split()
+    data = '''
+####################
+####################
+########1###########
+########+###########
+######.....#########
+##...#..@..#########
+#2.00.........0.####
+##...#.....###...3##
+####################
+####################
+####################
+####################
+
 '''
 
+class DemoLevel(LevelDef):
+    name = 'demo'
+    transitions = ''.split()
+    data = '''
+..############2#....
+..#..P,,p;;;##.#....
+###.#,##,##.##.#....
+3.g.#,##,##.g..#....
+###..,##,;;;####....
+..#.#,##p#....0#....
+..#.#,##,.g..g0#....
+..#..,##,#.....#....
+..#.0p,,,#.....#....
+..#............#....
+..##########@###....
+...........#1#......
+'''
 
-
-# Warp storage
-warp_storage_level_str = '''
+class WarpStorageLevel(LevelDef):
+    name = 'warp_storage'
+    transitions = ''.split()
+    data = '''
 ####################
 #####..#########..##
 #00.0..0.......0..##
-.@..#..#####.####.##
-#..00#######.####.##
+1@..#..#####.####.##
+##.#########.####.##
 ##0######.00...##.##
-#..0#####00.00.##..#
-#..0...##.0..0.##WW#
+#..0#####00..0.##.W#
+#..0...##.00.0.##.W#
 #.0.#.....0.0.0#####
 ####################
 ....................
@@ -484,29 +528,84 @@ warp_storage_level_str = '''
 '''
 
 
-# Some boring level
-boring_level_str = '''
+class BoringLevel(LevelDef):
+    name = 'boring'
+    transitions = ''.split()
+    data = '''
 ####################
-##p########p######P#
+##p#####..#p#####P##
 #..................#
 ########..#.######.#
-##..........######0#
->@.0000#..#.##.....#
-##.0.0.#....##.....#
-##...0.#..#.##.g..g#
+##..........#####.0#
+>@.0000#..#.##000..#
+##.0.0.#....##000..#
+##...0.#..#.##....g#
 ##.0.0.#.....0.....>
 ##..#######.##..g..#
-##....g..g..##....g#
-##....g...g.##.....#
+##.g....g...########
+##....g...g.########
 #######>############
 '''
 
+
+class BigroomLevel(LevelDef):
+    name = 'bigroom'
+    transitions = ''.split()
+    data = '''
+####################
+#..................#
+#..................#
+#..................#
+#..................#
+#@.................#
+#..................#
+#..................#
+#..................#
+#..................#
+#..................#
+####################
+'''
+
+
 # Laser cutting
+class LaserLevel(LevelDef):
+    name = 'laserroom'
+    transitions = ''.split()
+    data = '''
+####################
+#..............#.s.#
+#..#..#00#s.#......#
+#..????..????..#####
+#..#..#p.#..#......#
+#p.............#P..#
+####...######..#####
+#..................#
+#.p.......S....#..@1
+#.s....##..#...#...#
+#.......g..#.......#
+#######2############
+'''
 
 # Compact battery production
 
 # Communication room
-
+class CommroomLevel(LevelDef):
+    name = 'comm'
+    transitions = ''.split()
+    data = '''
+####################
+#.P#............#..#
+#.................p#
+####0...........####
+#..#...............#
+#?.g...............#
+#..#...............#
+####...............#
+####............####
+#..................#
+#.p#............#.p#
+####################
+'''
 # Logistics
 
 # Spaceport
@@ -521,7 +620,7 @@ boring_level_str = '''
 
 # Cybergoat production
 
-
+all_levels = LevelDef.__subclasses__()
 
 def char_to_cell(ch) -> Cell:
     if ch == '#':
@@ -533,7 +632,7 @@ def char_to_cell(ch) -> Cell:
         c = Cell('floor')
         return c
 
-    if ch in "Pp":
+    if ch in "PpCcSs":
         c = Cell('waypoint')
         c.waypoint_char = str.lower(ch)
         return c
@@ -543,7 +642,7 @@ def char_to_cell(ch) -> Cell:
         c.passable = False
         return c
 
-    if ch == '>':
+    if ch in '>123456789':
         c = Cell('door')
         c.passable = False
         return c
@@ -559,13 +658,13 @@ def char_to_object(ch):
         return Object('light')
 
 def char_to_monster(ch):
-    if ch == 'P':
+    if ch in 'PCS':
         m= Bot('security')
         m.char = str.lower(ch)
         return m
     if ch == 'g':
         return Monster('goat')
-    if ch == 'S':
+    if ch == 't':
         return Monster('stranger')
 
 
@@ -594,7 +693,7 @@ def load_level_str(level_str) -> Level:
 
     for m in level.monsters:
         if isinstance(m, Bot):
-            print("WP prepare for", m)
+            #print("WP prepare for", m)
             m.prepare_waypoints(level)
 
     return level
@@ -642,28 +741,49 @@ class PygletApp(pyglet.window.Window):
         pyglet.app.run()
 
     def on_key_press(self, symbol, modifiers):
-        print('press', pyglet.window.key.symbol_string(symbol), modifiers)
+        #print('press', pyglet.window.key.symbol_string(symbol), modifiers)
+        pass
 
     def on_key_release(self, symbol, modifiers):
-        print('release', pyglet.window.key.symbol_string(symbol), modifiers)
+        #print('release', pyglet.window.key.symbol_string(symbol), modifiers)
 
         #if symbol == pyglet.window.key.Q and modifiers == pyglet.window.key.MOD_CTRL:
         #    self.close()
+        if symbol == pyglet.window.key.R:
+            session.reinit(session.level_name)
+
+        if symbol in (pyglet.window.key.N, pyglet.window.key.P)   and modifiers == pyglet.window.key.MOD_CTRL:
+            ii = 0
+            for i in range(len(all_levels)):
+                if all_levels[i].name == session.level_name:
+                    if symbol == pyglet.window.key.N:
+                        ii = i + 1
+                    else:
+                        ii = i + len(all_levels) - 1
+                    ii = ii % len(all_levels)
+                    print('ii',i, len(all_levels), ii)
+                    break
+
+            session.reinit(all_levels[ii].name)
+
         if symbol == pyglet.window.key.ESCAPE:
            self.close()
 
     def on_mouse_press(self, x, y, button, modifiers):
-        print('on_mouse_press', x, y, button, modifiers)
+        #print('on_mouse_press', x, y, button, modifiers)
+        pass
 
 
     def on_mouse_release(self, x, y, button, modifiers):
-        print('on_mouse_release', x, y, button, modifiers)
+        #print('on_mouse_release', x, y, button, modifiers)
+        pass
 
     def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
-        print('on_mouse_drag',x, y, dx, dy, buttons, modifiers)
+        #print('on_mouse_drag',x, y, dx, dy, buttons, modifiers)
+        pass
 
     def on_mouse_scroll(self, x, y, scroll_x, scroll_y):
-        print('on_mouse_scroll',x, y, scroll_x, scroll_y)
+        #print('on_mouse_scroll',x, y, scroll_x, scroll_y)
         pass
 
     def on_draw(self):
@@ -693,8 +813,8 @@ class PygletApp(pyglet.window.Window):
 class App:
     def __init__(self):
         global session
-        self.sess = Session()
-        session = self.sess
+        self.sess = session #Session()
+        #session = self.sess
         self.papp = PygletApp(width=1280,height=800)
         self.papp.sess = self.sess
         self.sess.app = self.papp
