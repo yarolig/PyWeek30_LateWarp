@@ -3,6 +3,8 @@ import pyglet
 import random
 import copy
 
+from pyglet.gl import *
+
 TILE_W = 64
 def make_2d(f, w, h):
     return [[f(x, y) for x in range(w)] for y in range(h)]
@@ -1018,11 +1020,14 @@ class PygletApp(pyglet.window.Window):
         self.flip()
 
     def draw_sprite(self, name, x, y):
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         if name not in self.images:
             self.images[name]=pyglet.image.load('data/pics/%s.png'%name)
             remove_guidelines(self.images[name])
 
         self.images[name].blit(x,y)
+        glDisable(GL_BLEND)
 
 
 class App:

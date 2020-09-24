@@ -4,15 +4,17 @@ https://pyweek.org/e/LateWarp/
 
 ## How to play
 
-Just launch run_game.py
+Just launch ```run_game.py```
 
 
 ## Controls
-WASD, Arrows - move
-Shift        - move without pushing crates
-R            - use warpback (resets level, usually)
-Space        - fire weapon
-Escape       - quit game
+```
+WASD, Arrows - move  
+Shift        - move without pushing crates  
+R            - use warpback device (resets level, usually)    
+Space        - fire weapon  
+Escape       - quit game      
+```
 
 ## Cheats:
 Ctrl+P, Ctrl+N - change level
