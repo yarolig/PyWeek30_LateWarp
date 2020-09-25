@@ -9,6 +9,8 @@ You can install it with command ```pip install --upgrade --user pyglet```
 
 Just launch ```run_game.py```
 
+Also you will need 1280x800 screen. It may work with 1280x768 too. And a good video card.
+
 ## Controls
 ```
 WASD, Arrows - move  

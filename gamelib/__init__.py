@@ -8,6 +8,8 @@ from pyglet.gl import *
 from pyglet.media import player
 
 TILE_W = 64
+SPEED=6
+DELAY=0
 
 CONTROLS_CUTSCENE = '''
         Controls
@@ -15,12 +17,14 @@ CONTROLS_CUTSCENE = '''
 WASD, Arrows - move  
 Shift        - move without pushing crates  
 R            - use warpback device (resets level, usually)    
-Space        - fire weapon
+Space        - hold to ready a weapon (it fires automatically)
 
 M            - toggle music
 F1           - show controlls
 F2           - show status         
-F3           - show last message      
+F3           - show last message  
+
+F4-F9        - change game speed    
 
 F10, Ctrl+Q  - quit game  
 '''
@@ -156,7 +160,8 @@ class Level:
     def get_named_entry_txyc(self, entry_name):
         for x, y, c in enum_2d(self.m):
             if c.travel_to:
-                print ('travel_to', c, c.travel_to)
+                #print ('travel_to', c, c.travel_to)
+                pass
             if c.travel_to == entry_name:
                 return x,y,c
         else:
@@ -376,9 +381,11 @@ class Bot(Monster):
                     result.insert(0, (x, y))
                     break
         else:
-            #print('warning: no path')
+            print('warning: no path')
             draw_cost()
+            pass
         #result.reverse()
+
         return result
 
 
@@ -455,6 +462,15 @@ class Laser(Object):
     pickable = True
     def on_pick(self, m: Monster):
         m.has_laser = True
+        session.cutscene('''
+
+
+You picked up lasergun!
+It actually laser cutter but works as a weapon.
+
+Hold Space to ready this weapon.
+It will fire automatically when you close to enemies.    
+''')
 
 class Battery(Object):
     name = 'battery'
@@ -519,7 +535,7 @@ class Session:
         self.level_name = level_name
         self.level = self.load_level_by_name(level_name)
         self.loaded_levels[level_name] = self.level
-        print('Level', level_name)
+        #print('Level', level_name)
 
         self.player = copy.copy(self.player_copy)
         self.player.x, self.player.y = self.level.entry_pos
@@ -538,7 +554,7 @@ class Session:
 
     def travel(self, dest):
         travel_from = self.level_name
-        print('travel to', dest, 'from', travel_from)
+        #print('travel to', dest, 'from', travel_from)
         if dest not in self.loaded_levels:
             level = self.load_level_by_name(dest)
 
@@ -628,7 +644,7 @@ class Session:
             return
         if not tc.vacant:
             return
-        print('sc.ub', sc.used_by)
+        #print('sc.ub', sc.used_by)
         if isinstance(sc.used_by, Object):
             o = sc.used_by
             o.x = dtx*TILE_W
@@ -662,7 +678,7 @@ class Session:
             self.m_phy(m)
 
     def m_phy(self, m):
-        speed=8
+        speed=SPEED
         dx = dy = 0
 
         if m.hp <= 0:
@@ -750,7 +766,7 @@ class Session:
             self.kick(m)
 
         if not passed and isinstance(m, Bot):
-            print('update_path')
+            #print('update_path')
             m.update_path()
 
         if m is self.player and c:
@@ -825,7 +841,7 @@ class EntranceLevel(LevelDef):
 ####################
 ########1###########
 ########-###########
-######&^...#########
+######&~...#########
 ##...#.@...#########
 #2.00.........0.####
 ##...#.....###...3##
@@ -966,6 +982,12 @@ class LaserLevel(LevelDef):
 ######g2g###########
 '''
 
+    @staticmethod
+    def on_enter():
+        session.cutscene('''
+This looks challenging.
+''')
+
 
 # Laser cutting2
 class Laser2Level(LevelDef):
@@ -1023,6 +1045,23 @@ Don't worry, it was completely safe."
 
 ''')
 
+    @staticmethod
+    def on_computer():
+        session.cutscene('''
+
+Thank you for playing LateWarp!
+
+
+
+Pyweek30 individual entry by Alexander Izmailov.
+Music by hermetico.
+
+
+
+
+https://pyweek.org/e/LateWarp/
+''')
+
 
 # Communication room
 class CommroomLevel(LevelDef):
@@ -1045,9 +1084,17 @@ class CommroomLevel(LevelDef):
 
     @staticmethod
     def on_enter():
-        session.cutscene('''
+        if session.player.has_laser:
+            session.cutscene('''
 Looks like a communication room.
 I hope equipment is not destroyed completely.
+''')
+        else:
+            session.cutscene('''
+Looks like a communication room.
+
+Can't get there.
+Should be some way to deal with this thing...
 ''')
 
     @staticmethod
@@ -1084,6 +1131,13 @@ class LogisticsLevel(LevelDef):
 #s..p.#..@.#########
 #########1##########
 '''
+    @staticmethod
+    def on_enter():
+        session.cutscene('''
+There is a lot of cables here.
+
+Communication room should be near.
+''')
 
 # Spaceport
 class SpaceLevel(LevelDef):
@@ -1206,6 +1260,13 @@ class EnvLevel(LevelDef):
 #.....#..#.........#
 #######2############
 '''
+    @staticmethod
+    def on_computer():
+        session.cutscene('''
+This computer controlls oxyden regeneration.
+I shoud not touch this.        
+''')
+
 # Robot maintenance
 class BotLevel(LevelDef):
     name = 'botroom'
@@ -1298,6 +1359,11 @@ def char_to_cell(ch) -> Cell:
     if ch == '^':
         c = Computer('warpgate')
         return c
+
+    if ch == '~':
+        c = Computer('warpgate_broken')
+        return c
+
 
     if ch in '&|':
         c = Computer('computer')
@@ -1427,6 +1493,7 @@ def remove_guidelines(pic):
 class PygletApp(pyglet.window.Window):
     def __init__(self, *args, **kwargs):
         pyglet.window.Window.__init__(self, *args, **kwargs)
+        print("Pyglet OpenGL config: ", self.context.config)
 
         self.keys = pyglet.window.key.KeyStateHandler()
         self.push_handlers(self.keys)
@@ -1459,7 +1526,7 @@ class PygletApp(pyglet.window.Window):
     def run(self):
         self.fps_display = pyglet.window.FPSDisplay(self)
         #self.window = pyglet.window.Window()
-        pyglet.clock.schedule_interval(self.update, 1/120.0)
+        pyglet.clock.schedule_interval(self.update, 1/60.0)
         pyglet.app.run()
 
     def on_key_press(self, symbol, modifiers):
@@ -1487,6 +1554,8 @@ class PygletApp(pyglet.window.Window):
             session.player.has_laser = True
         if symbol == pyglet.window.key.B and modifiers == pyglet.window.key.MOD_CTRL:
             session.player.has_boots = True
+        if symbol == pyglet.window.key.D and modifiers == pyglet.window.key.MOD_CTRL:
+            session.defense_on = not session.defense_on
 
         if symbol in (pyglet.window.key.N, pyglet.window.key.P)   and modifiers == pyglet.window.key.MOD_CTRL:
             self.reinit_d(symbol)
@@ -1526,6 +1595,21 @@ All right.
             session.cutscene(status, force=True)
         if symbol == pyglet.window.key.F3:
             session.cutscene(session.prev_cutscene, force=True)
+
+        global  DELAY
+        if symbol == pyglet.window.key.F4:
+            DELAY = 0
+        if symbol == pyglet.window.key.F5:
+            DELAY = 5
+        if symbol == pyglet.window.key.F6:
+            DELAY = 10
+        if symbol == pyglet.window.key.F7:
+            DELAY = 15
+        if symbol == pyglet.window.key.F8:
+            DELAY = 20
+        if symbol == pyglet.window.key.F9:
+            DELAY = 25
+
         #if symbol == pyglet.window.key.ESCAPE:
         if symbol == pyglet.window.key.F10:
            self.close()
@@ -1542,7 +1626,7 @@ All right.
                 else:
                     ii = i + len(all_levels) - 1
                 ii = ii % len(all_levels)
-                print('ii', i, len(all_levels), ii)
+                #print('ii', i, len(all_levels), ii)
                 break
         session.reinit(all_levels[ii].name)
 
@@ -1575,7 +1659,7 @@ All right.
         self.label.draw()
         self.hint.draw()
         self.fps_display.draw()
-        self.flip()
+        #self.flip()
 
     def on_draw(self):
         pyglet.gl.glClearColor(6/255., 64/255., 111/255., 255)
@@ -1655,7 +1739,9 @@ All right.
             cx += dx
         glDisable(GL_BLEND)
         self.fps_display.draw()
-        self.flip()
+        if DELAY:
+            time.sleep(0.001*DELAY)
+        #self.flip()
 
     def draw_sprite(self, name, x, y, xx=None, yy=None):
 
@@ -1673,7 +1759,10 @@ class App:
         global session
         self.sess = session #Session()
         #session = self.sess
-        self.papp = PygletApp(width=1280,height=800)
+        self.papp = PygletApp(width=1280,
+                              height=768,
+                              vsync=True,
+                              config=pyglet.gl.Config(double_buffer=True))
         self.papp.sess = self.sess
         self.sess.app = self.papp
         self.sess.aapp = self
