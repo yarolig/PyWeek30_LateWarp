@@ -20,6 +20,10 @@ Escape       - quit game
 
 ## Cheats:
 Ctrl+P, Ctrl+N - change level  
+Ctrl+L - get lasergun  
+Ctrl+B - get spaceboots  
+Ctrl+W - get warpback device  
+Ctrl+G - toggle gravity    
 
 ## License
 LateWarp is free software.
