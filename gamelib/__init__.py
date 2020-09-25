@@ -81,6 +81,7 @@ class Gate(Cell):
     def on_present(self):
         if session.player.has_warpback:
             self.passable = True
+            self.name = 'floor'
         else:
             self.passable = False
 
@@ -91,7 +92,7 @@ class GravityComputer(Cell):
             session.gravity_on = True
 
     def on_step(self):
-        print('on_step')
+        #print('on_step')
         self.name = 'computer_broken'
         session.gravity_on = False
 
@@ -449,6 +450,14 @@ class Session:
         self.gravity_on = True
         self.remote_warpback = False
         self.reinit()
+        self.cutscenes = {}
+        self.current_cutscene = ''
+
+    def cutscene(self, text):
+        if text in self.cutscenes:
+            return
+        self.current_cutscene = text
+        self.cutscenes[self.current_cutscene] = True
 
     def reinit(self, level_name=None):
         if not level_name:
@@ -707,6 +716,9 @@ class LevelDef:
     name = ''
     data = ''
     transitions = ''.split()
+    @staticmethod
+    def on_load():
+        pass
 
 class StartLevel(LevelDef):
     name = 'start'
@@ -739,7 +751,7 @@ class EntranceLevel(LevelDef):
 #2.00.........0.####
 ##...#.....###...3##
 ######.....#########
-######....%#########
+######.....#########
 ######.....#########
 ####################
 '''
@@ -891,9 +903,9 @@ class CommroomLevel(LevelDef):
 #&.g..............@1
 #..#...............#
 ####..#......#.....#
-####00###..###..####
+####..###..###..####
 #..................#
-#.p#............#.p#
+#..#............#..#
 ####################
 '''
 
@@ -1153,7 +1165,7 @@ def load_level(level_class) -> Level:
         if isinstance(m, Bot):
             #print("WP prepare for", m)
             m.prepare_waypoints(level)
-
+    level_class.on_load()
     return level
 
 
@@ -1193,7 +1205,10 @@ class PygletApp(pyglet.window.Window):
 
     def update(self, dt):
         #print('update', dt)
-        session.update()
+        if session.current_cutscene:
+            pass
+        else:
+            session.update()
     def run(self):
         self.fps_display = pyglet.window.FPSDisplay(self)
         #self.window = pyglet.window.Window()
@@ -1258,9 +1273,20 @@ class PygletApp(pyglet.window.Window):
         #print('on_mouse_scroll',x, y, scroll_x, scroll_y)
         pass
 
+    def draw_cutscene(self):
+        self.clear()
 
+        k = pyglet.window.key
+        kk = session.app.keys
+        if kk[k.ESCAPE] or kk[k.SPACE] or kk[k.ENTER] or kk[k.RETURN]:
+            session.current_cutscene = ''
+        self.fps_display.draw()
+        self.flip()
 
     def on_draw(self):
+        if session.current_cutscene:
+            self.draw_cutscene()
+            return
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         self.frameno += 1
