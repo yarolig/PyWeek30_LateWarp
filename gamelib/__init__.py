@@ -4,6 +4,7 @@ import random
 import copy
 
 from pyglet.gl import *
+from pyglet.media import player
 
 TILE_W = 64
 def make_2d(f, w, h):
@@ -67,9 +68,32 @@ class Cell:
         self.used_by = None
         self.waypoint_char = '\0'
         self.travel_to = ''
+    def on_present(self):
+        pass
+
+    def on_step(self):
+        pass
 
     def __str__(self):
         return "Cell(%s)" % (self.name)
+
+class Gate(Cell):
+    def on_present(self):
+        if session.player.has_warpback:
+            self.passable = True
+        else:
+            self.passable = False
+
+
+class GravityComputer(Cell):
+    def on_present(self):
+        if self.name == 'computer_G':
+            session.gravity_on = True
+
+    def on_step(self):
+        print('on_step')
+        self.name = 'computer_broken'
+        session.gravity_on = False
 
 
 class Level:
@@ -102,12 +126,21 @@ class Monster:
         self.y = 0
         self.facing = 'w'
         self.hp = 10
+        self.hpmax = 10
         self.tilename=tilename
         self.char='?'
         self.fire_range = 0
         self.name = tilename
         self.attacking = False
+
+        self.has_laser = False
+        self.has_warpback = False
+        self.has_boots = False
+        self.has_rapair_kit = False
+
         self.clear_input()
+
+
     def __str__(self):
         return "Mon(%d %d %d)" % (self.x, self.y, self.hp)
 
@@ -175,6 +208,9 @@ class Bot(Monster):
             ((self.x + TILE_W // 2) // TILE_W, (self.y + TILE_W // 2) // TILE_W),
             self.waypoints[self.current_waypoint])
     def ai(self):
+        if not session.gravity_on:
+            self.clear_input()
+            return
         #print('bot ai')
         tgt_x, tgt_y = self.x, self.y
         if not self.path and self.waypoints:
@@ -319,6 +355,8 @@ class Player(Monster):
     def __init__(self, *args, **kwargs):
         Monster.__init__(self, *args, **kwargs)
         self.fire_range = 2
+        self.hp = 30
+        self.hpmax = 50
 
     def ai(self):
         self.clear_input()
@@ -333,7 +371,7 @@ class Player(Monster):
         if kk[k.D] or kk[k.RIGHT] or kk[k.L]:
             self.in_d = True
         if kk[k.SPACE]:
-            self.in_kick = True
+            self.in_attack = True
         if kk[k.LSHIFT]  or kk[k.RSHIFT]:
             self.in_walk = True
 
@@ -348,6 +386,8 @@ class Object:
     blocks_path = False
     blocks_path_finding = False
     pickable = False
+    def on_pick(self, m: Monster):
+        pass
 
 
 class Box(Object):
@@ -360,11 +400,14 @@ class Box(Object):
 class Warpback(Object):
     name = 'warpback'
     pickable = True
-
+    def on_pick(self, m: Monster):
+        m.has_warpback = True
 
 class Laser(Object):
     name = 'laser'
     pickable = True
+    def on_pick(self, m: Monster):
+        m.has_laser = True
 
 class Battery(Object):
     name = 'battery'
@@ -373,6 +416,16 @@ class Battery(Object):
 class Boots(Object):
     name = 'boots'
     pickable = True
+    def on_pick(self, m: Monster):
+        m.has_boots = True
+
+class Medkit(Object):
+    name = 'hp'
+    pickable = True
+    def on_pick(self, m: Monster):
+        if m.hp < 30:
+            m.hp = 30
+
 
 class Decal:
     def __init__(self, name, x=0, y=0):
@@ -393,10 +446,13 @@ class Session:
         self.loaded_levels = {}
         self.player = Player()
         self.player_copy = copy.copy(self.player)
+        self.gravity_on = True
+        self.remote_warpback = False
         self.reinit()
 
     def reinit(self, level_name=None):
         if not level_name:
+            #level_name = 'start'
             level_name = 'entrance'
         self.level_name = level_name
         self.level = self.load_level_by_name(level_name)
@@ -413,6 +469,9 @@ class Session:
         else:
             print('Error: no such level', lname)
             return None
+
+    def player_on_ground(self):
+        return self.gravity_on or self.player.has_boots
 
     def travel(self, dest):
         travel_from = self.level_name
@@ -468,6 +527,13 @@ class Session:
         pass
 
     def auto_attack(self, m: Monster):
+        if m.name == 'security' and not session.gravity_on:
+            return
+        if m is session.player and not session.player_on_ground():
+            return
+        if m is session.player and not m.has_laser:
+            return
+
         tx, ty, c = self.xy2ctxy(m.x, m.y)
         for cx,cy,c in self.cells_in_range(tx, ty, m.fire_range):
             if not self.can_see(tx, ty, cx,cy):
@@ -510,6 +576,7 @@ class Session:
         for x, y, c in enum_2d(self.level.m):
             c.vacant = True
             c.used_by = None
+            c.on_present()
 
         def vx(m):
             tx = (m.x + TILE_W//2) // TILE_W
@@ -542,8 +609,12 @@ class Session:
                 self.level.monsters.remove(m)
             return
 
-        if m.fire_range > 0:
-            self.auto_attack(m)
+        if m is self.player:
+            if m.in_attack and m.fire_range > 0:
+                self.auto_attack(m)
+        else:
+            if m.fire_range > 0:
+                self.auto_attack(m)
 
         if m.in_w:
             dy+=speed
@@ -573,11 +644,16 @@ class Session:
             if not c.passable:
                 return False
             if not c.vacant:
-                return c.used_by is m
+                if c.used_by is m:
+                    return True
+                if isinstance(c.used_by, Object):
+                    return not c.used_by.blocks_path
             return True
 
-        def can_kick(cell):
-            if session.player.in_walk:
+        def can_kick(cell, m):
+            if m is self.player and self.player.in_walk:
+                return False
+            if m is self.player and not self.player_on_ground():
                 return False
             if not cell:
                 return False
@@ -595,7 +671,7 @@ class Session:
         if can_pass(c):
             m.x += dx
             if dx: passed = True
-        elif can_kick(c):
+        elif can_kick(c, m):
             self.kick(m)
 
         tx, ty, c = self.xy2ctxy(m.x, m.y + dy)
@@ -606,13 +682,18 @@ class Session:
         if can_pass(c):
             m.y += dy
             if dy: passed = True
-        elif can_kick(c):
+        elif can_kick(c, m):
             self.kick(m)
 
         if not passed and isinstance(m, Bot):
             print('update_path')
             m.update_path()
 
+        if m is self.player and c:
+            assert isinstance(c, Cell)
+            c.on_step()
+            if c.used_by and isinstance(c.used_by, Object):
+                c.used_by.on_pick(m)
 
 
 
@@ -620,16 +701,30 @@ class Session:
 
 
 
-
-# Sunrise Warp Travel
-'''
-'''
 
 
 class LevelDef:
     name = ''
     data = ''
     transitions = ''.split()
+
+class StartLevel(LevelDef):
+    name = 'start'
+    transitions = ''.split()
+    data = '''
+$$$$$$$$$$$$$$$$$$$$
+$$$$$$$$$$$$$$$$$$$$
+$$$$$$$$$$$$$$$$$$$$
+$$$$$$$$$$$$$$$$$$$$
+$$$$$$$^&$$$$$$$$$$$
+$,,,,,,.H,,,,,,....$
+$........,,,,,,....$
+$...@....,,,,,,....$
+$,,,,,,,,,,,,,,....$
+$,,,,,,,,,,,,,,0000$
+$,,,,,,,,,,,,,,0000$
+$$$$$$$$$$$$$$$$$$$$
+'''
 
 class EntranceLevel(LevelDef):
     name = 'entrance'
@@ -638,13 +733,13 @@ class EntranceLevel(LevelDef):
 ####################
 ####################
 ########1###########
-########.###########
+########-###########
 ######&^...#########
 ##...#.@...#########
 #2.00.........0.####
 ##...#.....###...3##
 ######.....#########
-######.....#########
+######....%#########
 ######.....#########
 ####################
 '''
@@ -654,16 +749,16 @@ class DemoLevel(LevelDef):
     transitions = 'entrance laserroom logistics'.split()
     data = '''
 ..############3#....
-..#..P,,p;;;.#.#....
-###.#,##,##.g#.#....
-2...#,##,##....#....
-##g..,##,;;;####....
-.##.#,##p#....0#....
-..#.#,##,.g..g0#....
-..#..,##,#.....#....
-..#.0p,,,#.....#....
-..#............#....
-..##########@###....
+..#..P..p....#.#....
+###.#.##.##.g#.#....
+2...#.##.##....#....
+##g...##....####....
+.##.#.##p#....0#....
+..#.#.##..g..g0#....
+..#...##.#.....#####
+..#.0p...#.....#.+.#
+..#................#
+..##########@#######
 ...........#1#......
 '''
 
@@ -756,7 +851,7 @@ class Laser2Level(LevelDef):
 ########1###########
 ####....@.....######
 ####...............2
-####..*.......######
+####..L..+....######
 ####..........######
 #############.######
 #######........#####
@@ -829,7 +924,7 @@ class FuelLevel(LevelDef):
     transitions = 'goatroom envroom'.split()
     data = '''
 ###############2####
-#....##....#.#.....#
+#....##....#.#....+#
 #....#1@...#.####.##
 #....##....0.#....S#
 #....##....#.#.#####
@@ -942,16 +1037,37 @@ def char_to_cell(ch) -> Cell:
         c.passable = False
         return c
 
-    if ch in ".,;:\'\"@g0WLBO":
+    if ch in ".;:\'\"@g0WLBOH|+":
         c = Cell('floor')
+        return c
+
+    if ch == ",":
+        c = Cell('ground')
+        return c
+
+    if ch == "-":
+        c = Gate('gate')
+        return c
+
+    if ch == "$":
+        c = Cell('start_wall')
+        c.passable = False
         return c
 
     if ch == '^':
         c = Cell('warpgate')
         return c
 
-    if ch == '&':
+    if ch in '&|':
         c = Cell('computer')
+        return c
+
+    if ch == '%':
+        c = GravityComputer('computer_G')
+        return c
+
+    if ch == 'v':
+        c = Cell('computer_broken')
         return c
 
     if ch in "PpCcSsMm":
@@ -980,6 +1096,8 @@ def char_to_object(ch):
         return Battery()
     if ch == 'O':
         return Boots()
+    if ch == '+':
+        return Medkit()
 
 
 def char_to_monster(ch):
@@ -994,6 +1112,8 @@ def char_to_monster(ch):
     if ch in 'traTRA':
         return Monster('stranger')
 
+    if ch in 'H':
+        return Monster('player')
 
 
 def load_level(level_class) -> Level:
@@ -1090,7 +1210,19 @@ class PygletApp(pyglet.window.Window):
         #if symbol == pyglet.window.key.Q and modifiers == pyglet.window.key.MOD_CTRL:
         #    self.close()
         if symbol == pyglet.window.key.R:
-            session.reinit(session.level_name)
+            if session.player.has_warpback or session.level_name == 'warp_storage':
+                session.reinit(session.level_name)
+
+
+        if symbol == pyglet.window.key.G and modifiers == pyglet.window.key.MOD_CTRL:
+            session.gravity_on = not session.gravity_on
+
+        if symbol == pyglet.window.key.W and modifiers == pyglet.window.key.MOD_CTRL:
+            session.player.has_warpback = True
+        if symbol == pyglet.window.key.L and modifiers == pyglet.window.key.MOD_CTRL:
+            session.player.has_laser = True
+        if symbol == pyglet.window.key.B and modifiers == pyglet.window.key.MOD_CTRL:
+            session.player.has_boots = True
 
         if symbol in (pyglet.window.key.N, pyglet.window.key.P)   and modifiers == pyglet.window.key.MOD_CTRL:
             ii = 0
@@ -1126,7 +1258,11 @@ class PygletApp(pyglet.window.Window):
         #print('on_mouse_scroll',x, y, scroll_x, scroll_y)
         pass
 
+
+
     def on_draw(self):
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         self.frameno += 1
         #print('draw')
         self.clear()
@@ -1137,28 +1273,76 @@ class PygletApp(pyglet.window.Window):
             self.draw_sprite(o.name, o.x, o.y)
 
         for m in session.level.monsters:
+            if not session.gravity_on and m.name == 'security':
+                n = 'security_nog'
+                self.draw_sprite(n, m.x, m.y)
+                continue
             asuf = ''
             if m.attacking and (self.frameno % 3 == 1):
                 asuf = '_fire'
             self.draw_sprite(m.tilename + asuf, m.x, m.y)
             m.attacking = False
+
         p=session.player
-        if p.hp > 0:
-            self.draw_sprite('player', p.x, p.y)
+        if not session.player_on_ground():
+            n = 'player_nog'
+            self.draw_sprite(n, p.x, p.y)
         else:
-            self.draw_sprite('warp_anim%d' % (self.frameno // 5 % 3 + 1), p.x, p.y)
+            asuf = ''
+            if p.attacking and (self.frameno % 3 == 2):
+                asuf = '_fire'
+            if p.hp > 0:
+                self.draw_sprite('player' + asuf, p.x, p.y)
+                p.attacking = False
+            else:
+                self.draw_sprite('warp_anim%d' % (self.frameno // 5 % 3 + 1), p.x, p.y)
+
+        cy = 32
+        cx = 50
+        dx = 50
+        #p.has_warpback = True
+        #p.has_boots = True
+        #p.has_laser = True
+
+        if p.has_boots:
+            self.draw_sprite('circle', cx, cy, 16, 16)
+            self.draw_sprite('boots', cx, cy, 16, 16)
+
+            cx += dx
+        if p.has_laser:
+            self.draw_sprite('circle', cx, cy, 16, 16)
+            self.draw_sprite('laser', cx, cy, 16, 16)
+            cx += dx
+        if p.has_warpback:
+            self.draw_sprite('circle', cx, cy, 16, 16)
+            self.draw_sprite('warpback', cx, cy, 16, 16)
+            cx += dx
+        if p.hp>=10:
+            self.draw_sprite('circle', cx, cy, 16, 16)
+            self.draw_sprite('hp', cx, cy, 16, 16)
+            cx += dx
+        if p.hp>=20:
+            self.draw_sprite('circle', cx, cy, 16, 16)
+            self.draw_sprite('hp', cx, cy, 16, 16)
+            cx += dx
+
+        if p.hp >= 30:
+            self.draw_sprite('circle', cx, cy, 16, 16)
+            self.draw_sprite('hp', cx, cy, 16, 16)
+            cx += dx
+        glDisable(GL_BLEND)
         self.fps_display.draw()
         self.flip()
 
-    def draw_sprite(self, name, x, y):
-        glEnable(GL_BLEND)
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+    def draw_sprite(self, name, x, y, xx=None, yy=None):
+
         if name not in self.images:
             self.images[name]=pyglet.image.load('data/pics/%s.png'%name)
             remove_guidelines(self.images[name])
-
-        self.images[name].blit(x,y)
-        glDisable(GL_BLEND)
+        #if xx is not None:
+        #    self.images[name].blit(x,y,xx,yy)
+        #else:
+        self.images[name].blit(x, y)
 
 
 class App:

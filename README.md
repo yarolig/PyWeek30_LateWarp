@@ -4,8 +4,10 @@ https://pyweek.org/e/LateWarp/
 
 ## How to play
 
-Just launch ```run_game.py```
+You will need pyglet library.  
+You can install it with command ```pip install --upgrade --user pyglet```
 
+Just launch ```run_game.py```
 
 ## Controls
 ```
@@ -17,7 +19,7 @@ Escape       - quit game
 ```
 
 ## Cheats:
-Ctrl+P, Ctrl+N - change level
+Ctrl+P, Ctrl+N - change level  
 
 ## License
 LateWarp is free software.
