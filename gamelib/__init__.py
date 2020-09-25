@@ -2,11 +2,29 @@ import pyglet
 # import pymunk
 import random
 import copy
+import time
 
 from pyglet.gl import *
 from pyglet.media import player
 
 TILE_W = 64
+
+CONTROLS_CUTSCENE = '''
+        Controls
+    
+WASD, Arrows - move  
+Shift        - move without pushing crates  
+R            - use warpback device (resets level, usually)    
+Space        - fire weapon
+
+M            - toggle music
+F1           - show controlls
+F2           - show status         
+F3           - show last message      
+
+F10, Ctrl+Q  - quit game  
+'''
+
 def make_2d(f, w, h):
     return [[f(x, y) for x in range(w)] for y in range(h)]
 
@@ -84,6 +102,33 @@ class Gate(Cell):
             self.name = 'floor'
         else:
             self.passable = False
+            self.name = 'gate'
+
+
+class GateBoot(Cell):
+    def on_present(self):
+        if session.player.has_boots:
+            self.passable = True
+            self.name = 'floor'
+        else:
+            self.passable = False
+            self.name = 'gate'
+
+
+class GateDefense(Cell):
+    def on_present(self):
+        if not session.defense_on and session.gravity_on:
+            self.passable = True
+            self.name = 'floor'
+        else:
+            self.passable = False
+            self.name = 'gate'
+
+
+
+class Computer(Cell):
+    def on_step(self):
+        session.level.cls.on_computer()
 
 
 class GravityComputer(Cell):
@@ -357,7 +402,7 @@ class Player(Monster):
     def __init__(self, *args, **kwargs):
         Monster.__init__(self, *args, **kwargs)
         self.fire_range = 2
-        self.hp = 30
+        self.hp = 10
         self.hpmax = 50
 
     def ai(self):
@@ -449,22 +494,28 @@ class Session:
         self.player = Player()
         self.player_copy = copy.copy(self.player)
         self.gravity_on = True
+        self.defense_on = True
         self.remote_warpback = False
         self.reinit()
         self.cutscenes = {}
-        self.current_cutscene = ''
+        self.prev_cutscene = '1'
+        self.current_cutscene = '1'
+        self.draw_fps = False
 
-    def cutscene(self, text):
-        if text in self.cutscenes:
+    def cutscene(self, text, force=False):
+
+        if not force and text in self.cutscenes:
             return
+        if not force:
+            self.prev_cutscene = text
         self.current_cutscene = text
         self.cutscenes[self.current_cutscene] = True
         self.app.make_label(text)
 
     def reinit(self, level_name=None):
         if not level_name:
-            #level_name = 'start'
-            level_name = 'entrance'
+            level_name = 'start'
+            #level_name = 'entrance'
         self.level_name = level_name
         self.level = self.load_level_by_name(level_name)
         self.loaded_levels[level_name] = self.level
@@ -472,6 +523,7 @@ class Session:
 
         self.player = copy.copy(self.player_copy)
         self.player.x, self.player.y = self.level.entry_pos
+        self.level.cls.on_enter()
 
     def load_level_by_name(self, lname):
         for i in all_levels:
@@ -727,6 +779,22 @@ class LevelDef:
     def on_enter():
         pass
 
+    @staticmethod
+    def on_computer():
+        pass
+
+FIRST_CUTSCENE = '''
+Hello and welcome to Sunrise Warp Travel Resort!
+
+Soon you going to relax on the other side of the Galaxy!
+But you are a bit late. Please HURRY!
+
+Don't worry, it is completely safe.
+Out customers are 100% satisfied! 
+
+Please step inside the warp gate...
+'''
+
 class StartLevel(LevelDef):
     name = 'start'
     transitions = ''.split()
@@ -735,15 +803,19 @@ $$$$$$$$$$$$$$$$$$$$
 $$$$$$$$$$$$$$$$$$$$
 $$$$$$$$$$$$$$$$$$$$
 $$$$$$$$$$$$$$$$$$$$
-$$$$$$$^&$$$$$$$$$$$
-$,,,,,,.H,,,,,,....$
-$........,,,,,,....$
-$...@....,,,,,,....$
-$,,,,,,,,,,,,,,....$
-$,,,,,,,,,,,,,,0000$
-$,,,,,,,,,,,,,,0000$
-$$$$$$$$$$$$$$$$$$$$
+$$$$$$&^$$$$$$$$$$$$
+,,,,,,..H,,,,,,.....
+........,,,,,,,.....
+....@...,,,,,,,.....
+,,,,,,,,,,,,,,,.....
+,,,,,,,,,,,,,,,0000.
+,,,,,,,,,,,,,,,0000.
+,,,,,,,,,,,,,,,0000.
 '''
+
+    @staticmethod
+    def on_computer():
+        session.reinit('entrance')
 
 class EntranceLevel(LevelDef):
     name = 'entrance'
@@ -752,7 +824,7 @@ class EntranceLevel(LevelDef):
 ####################
 ####################
 ########1###########
-########.###########
+########-###########
 ######&^...#########
 ##...#.@...#########
 #2.00.........0.####
@@ -762,6 +834,22 @@ class EntranceLevel(LevelDef):
 ######.....#########
 ####################
 '''
+    @staticmethod
+    def on_enter():
+        session.cutscene('''
+What???
+This is not Sunrise Warp Whatever!
+Where am i?
+It looks like an old ruined space factory!
+
+There is a gate with big sign:
+ 
+               "Warning!"
+        Hazardous area.
+        Warpback device required to enter.
+ 
+Maybe I can use that "warpback device" to WARP BACK?!
+        ''')
 
 class DemoLevel(LevelDef):
     name = 'demo'
@@ -772,7 +860,7 @@ class DemoLevel(LevelDef):
 ##g.#.##.##.g#.#....
 2...#.##.##....#....
 ###...##....########
-..#.#.##p#....0#..+#
+..#.#.##p#....0#...#
 ..#.#.##..g..g0#...#
 ..#...##.#.....##.##
 ..#.0p...#.........#
@@ -780,20 +868,15 @@ class DemoLevel(LevelDef):
 #################@##
 ................#1#.
 '''
-
+    @staticmethod
     def on_enter():
         if session.player.has_warpback:
             session.cutscene('''
-Warpback devices offers ultimate workers protection!
+Warpback devices offers ultimate protection for workers!
 Mining, heavy machinery and construction became extremely safe
 thanks to use of these devices.
-                ''')
-        else:
-            session.cutscene('''
-           "Warning!"
-    Hazardous area.
-    Warpback device required to enter.
-    ''')
+''')
+
 
 class WarpStorageLevel(LevelDef):
     name = 'warp_storage'
@@ -812,18 +895,22 @@ class WarpStorageLevel(LevelDef):
 ....................
 ....................
 '''
+
+    @staticmethod
     def on_load():
         session.cutscene('''
 You entered some kind of equipment storage.
 Map of this storage is available on you phone.
 There is warpback device in far corner.
-Cool! You can use it remotely!
+Cool! You can use it even remotely!
+
+But I should carry it to next rooms. 
 ''')
 
 
 class BoringLevel(LevelDef):
     name = 'boring'
-    transitions = 'logistics goatroom envroom'.split()
+    transitions = 'logistics botroom envroom'.split()
     data = '''
 ####################
 ##p#####..#p#####P##
@@ -898,45 +985,87 @@ class Laser2Level(LevelDef):
 #######..g#..g.#####
 ####################
 '''
-# Compact battery production
-class BatteryLevel(LevelDef):
-    name = 'batt'
-    transitions = 'envroom'.split()
+
+
+class EndLevel(LevelDef):
+    name = 'end'
+    transitions = 'space'.split()
     data = '''
-####################
-#..................#
-#..................#
-#..................#
-#..................#
-#..................#
-#..................#
-#..................#
-#........B.........#
-#..................#
-#........@.........#
-#########1##########
+$$$$$$$$$$$$$$$$,,,,
+$$$$$$$$$$$$$$$$,,,,
+$$$^&$$$$$$$$$$$,,,,
+,,,..,,,,,,,,,,H,,,,
+,,,..,,,,H,,,,HHH,,,
+.....,,,,,H,,,,,,,,,
+.....,,,,,,,,,,,HH,,
+,,,,,,,,,,,,,,,,H,,,
+,,,,,,,,,,H,,,,,,,,,
+$$$$$$$$$$$$$@$$$$$$
+$$$$$$$$$$$$$1$$$$$$
+$$$$$$$$$$$$$$$$$$$$
 '''
+    @staticmethod
+    def on_enter():
+        session.player.has_laser = False
+        session.cutscene('''
+???
+
+What???
+
+This is not a Stardock of Bizzare Cybergoat Factory!
+It looks like.. :) A Sunrise Whatever Warping Resort!
+
+"Hello and welcome to Sunrise Warp Travel Resort!
+On the other side of the Galaxy!
+
+Like I said out customers are 100% satisfied!
+Don't worry, it was completely safe."
+
+''')
 
 
 # Communication room
 class CommroomLevel(LevelDef):
     name = 'comm'
-    transitions = 'logistics'.split()
+    transitions = 'logistics space'.split()
     data = '''
 ####################
-#.P#............#..#
-#.................p#
-####00###..###..####
-#..#..#......#.....#
-#&.g..............@1
+#.P#.........#.....#
+#......0.....000...2
+#########00###.....#
+#..#......;..#######
+#&.g..;;;;........@1
 #..#...............#
-####..#......#.....#
-####..###..###..####
-#..................#
+####.........#.....#
+#########..###..####
+#.p...............p#
 #..#............#..#
 ####################
 '''
 
+    @staticmethod
+    def on_enter():
+        session.cutscene('''
+Looks like a communication room.
+I hope equipment is not destroyed completely.
+''')
+
+    @staticmethod
+    def on_computer():
+        session.cutscene('''
+Long range connection works well! You called you travel agents.
+"I lost! Where am I? Help me!!!"
+
+"You warped just near Sunrise Warp Resort.
+   Just on nearby planet.
+     On an old bizarre space factory.
+      We sending a rescue team to you.
+      
+ But... Could you disable base security?
+  The factory has old guns that may prevent docking"
+  
+  "Well... I'll try..."
+''')
 # Logistics
 class LogisticsLevel(LevelDef):
     name = 'logistics'
@@ -957,11 +1086,49 @@ class LogisticsLevel(LevelDef):
 '''
 
 # Spaceport
+class SpaceLevel(LevelDef):
+    name = 'space'
+    transitions = 'goatroom comm end'.split()
+    data = '''
+#########3##########
+#.......#/#...+LW..#
+#.......#&#........#
+#########"######.###
+#..................#
+2........@.........1
+#..................#
+####################
+#..................#
+#..................#
+#..................#
+####################
+'''
+    @staticmethod
+    def on_enter():
+        session.cutscene('''
+Looks like a space gate.
+A big sign tells you:
+
+ ! Wearing SPACEBOOTS is mandatory !
+ Warpback device may not help you.
+ 
+''')
+
+    @staticmethod
+    def on_computer():
+        if session.defense_on:
+            session.cutscene('''
+Access disallowed while defense system active.
+        ''')
+        if not session.gravity_on:
+            session.cutscene('''
+Access disallowed while gravity not working.
+''')
 
 # Fuel storage
 class FuelLevel(LevelDef):
     name = 'fuel'
-    transitions = 'goatroom envroom'.split()
+    transitions = 'botroom envroom'.split()
     data = '''
 ###############2####
 #....##....#.#....+#
@@ -997,25 +1164,34 @@ class FuelLevel(LevelDef):
 # Artifical gravity engines
 class GravityLevel(LevelDef):
     name = 'gravity'
-    transitions = 'boring fuel'.split()
+    transitions = 'envroom goatroom'.split()
     data = '''
-########1###########
-#..................#
-#..................#
-#..s.s.............#
-#...&..............#
-#..s.s...@.........2
-#..................#
-#..................#
-#..................#
-#..................#
-#..................#
 ####################
+#..................#
+#.....#######......#
+####..#.s.s.#..#####
+#gm#..#..%..#..#.M.#
+2..#..#.s.s.#..#...#
+#..#..###.###..#...#
+#..0...........0...#
+####...........#####
+#..g....#0#........#
+#.......#@#........#
+#########1##########
 '''
+
+    @staticmethod
+    def on_enter():
+        if session.player.has_warpback:
+            session.cutscene('''
+These room controls artifical gravity.
+I should be careful here.
+    ''')
+
 # Environment control
 class EnvLevel(LevelDef):
     name = 'envroom'
-    transitions = 'boring fuel batt'.split()
+    transitions = 'boring fuel gravity'.split()
     data = '''
 ###3################
 ###p######.........#
@@ -1033,37 +1209,51 @@ class EnvLevel(LevelDef):
 # Robot maintenance
 class BotLevel(LevelDef):
     name = 'botroom'
-    transitions = ''.split()
+    transitions = 'boring fuel'.split()
     data = '''
-####################
-###.....sp.........#
->.#.....c..........#
+#1##################
+#@#.....sp.........#
+#.#.....c..........#
 #.#..######M.M###P.#
 #..sc#M..###.####sc#
 ###p.#&......####..#
 ###..#M..########..#
 ###..#####....Sp...#
-#@##....sp.....c....#
->.#....C...#######.#
-##############.....#
-##############>#####
+####....sp.....c...#
+###....C...######.##
+##############.....2
+####################
 '''
+    @staticmethod
+    def on_enter():
+        session.cutscene('''
+A lot of security bots here        
+''')
+
+    @staticmethod
+    def on_computer():
+        session.cutscene('''
+You turned off defense cannons! Easily.
+
+Now lets go to the spacedock and get out! 
+''')
+        session.defense_on = False
 
 
 # Cybergoat production
 class CybergoatLevel(LevelDef):
     name = 'goatroom'
-    transitions = 'boring fuel'.split()
+    transitions = 'space gravity'.split()
     data = '''
-#1##################
-#@#......#...#.....#
+####################
+#.#......#...#.....#
 #.#.s#...#...#.....#
-#....#0#.....#.....#
+1....#0#.....#.....#
 ##...0...#...#.....#
 ##...#.....S...s...#
 ##..s........#.....#
 ##.###...#######...#
-#..................2
+#.................@2
 #====ggggggggg=====#
 #====gggOggggg=====#
 ####################
@@ -1077,19 +1267,27 @@ def char_to_cell(ch) -> Cell:
         c.passable = False
         return c
 
-    if ch in ".;:\'\"@g0WLBOH|+":
+    if ch in ".;:\'@g0WLBO|+":
         c = Cell('floor')
         return c
 
     if ch == '=':
         c = Cell('furniture')
         return c
-    if ch == ",":
+    if ch in ",H":
         c = Cell('ground')
         return c
 
     if ch == "-":
         c = Gate('gate')
+        return c
+
+    if ch == '"':
+        c = GateBoot('gate')
+        return c
+
+    if ch == '/':
+        c = GateDefense('gate')
         return c
 
     if ch == "$":
@@ -1098,11 +1296,11 @@ def char_to_cell(ch) -> Cell:
         return c
 
     if ch == '^':
-        c = Cell('warpgate')
+        c = Computer('warpgate')
         return c
 
     if ch in '&|':
-        c = Cell('computer')
+        c = Computer('computer')
         return c
 
     if ch == '%':
@@ -1268,6 +1466,7 @@ class PygletApp(pyglet.window.Window):
         #print('press', pyglet.window.key.symbol_string(symbol), modifiers)
         pass
 
+
     def on_key_release(self, symbol, modifiers):
         #print('release', pyglet.window.key.symbol_string(symbol), modifiers)
 
@@ -1276,7 +1475,8 @@ class PygletApp(pyglet.window.Window):
         if symbol == pyglet.window.key.R:
             if session.player.has_warpback or session.level_name == 'warp_storage':
                 session.reinit(session.level_name)
-
+        if symbol == pyglet.window.key.M:
+            session.aapp.toggle_music()
 
         if symbol == pyglet.window.key.G and modifiers == pyglet.window.key.MOD_CTRL:
             session.gravity_on = not session.gravity_on
@@ -1289,21 +1489,63 @@ class PygletApp(pyglet.window.Window):
             session.player.has_boots = True
 
         if symbol in (pyglet.window.key.N, pyglet.window.key.P)   and modifiers == pyglet.window.key.MOD_CTRL:
-            ii = 0
-            for i in range(len(all_levels)):
-                if all_levels[i].name == session.level_name:
-                    if symbol == pyglet.window.key.N:
-                        ii = i + 1
-                    else:
-                        ii = i + len(all_levels) - 1
-                    ii = ii % len(all_levels)
-                    print('ii',i, len(all_levels), ii)
-                    break
+            self.reinit_d(symbol)
+            if session.level_name in ('start', 'end'):
+                self.reinit_d(symbol)
 
-            session.reinit(all_levels[ii].name)
+        if symbol == pyglet.window.key.F1:
+            session.cutscene(CONTROLS_CUTSCENE, force=True)
 
-        if symbol == pyglet.window.key.ESCAPE:
+        if symbol == pyglet.window.key.F2:
+            status = '''
+            Status
+
+Health: %d
+Gravity: %s
+Defense cannons: %s
+Spacedock ready: %s
+
+
+Inventory:
+phone, tickets, intergalactic insurance
+%s%s%s
+''' % (session.player.hp,
+       "normal" if session.gravity_on else "no gravity",
+       "active" if session.defense_on else "disabled",
+       "no" if session.defense_on else "yes",
+       "warpback device\n" if session.player.has_warpback else "",
+       "laser pistol\n" if session.player.has_laser else "",
+       "space boots\n" if session.player.has_boots else ""
+       )
+            if session.level_name in ('start', 'end'):
+                status = '''
+            Status
+
+All right.
+'''
+            session.cutscene(status, force=True)
+        if symbol == pyglet.window.key.F3:
+            session.cutscene(session.prev_cutscene, force=True)
+        #if symbol == pyglet.window.key.ESCAPE:
+        if symbol == pyglet.window.key.F10:
            self.close()
+
+        if symbol == pyglet.window.key.Q and modifiers == pyglet.window.key.MOD_CTRL:
+            self.close()
+
+    def reinit_d(self, symbol):
+        ii = 0
+        for i in range(len(all_levels)):
+            if all_levels[i].name == session.level_name:
+                if symbol == pyglet.window.key.N:
+                    ii = i + 1
+                else:
+                    ii = i + len(all_levels) - 1
+                ii = ii % len(all_levels)
+                print('ii', i, len(all_levels), ii)
+                break
+        session.reinit(all_levels[ii].name)
+
 
     def on_mouse_press(self, x, y, button, modifiers):
         #print('on_mouse_press', x, y, button, modifiers)
@@ -1323,6 +1565,7 @@ class PygletApp(pyglet.window.Window):
         pass
 
     def draw_cutscene(self):
+
         self.clear()
 
         k = pyglet.window.key
@@ -1335,7 +1578,10 @@ class PygletApp(pyglet.window.Window):
         self.flip()
 
     def on_draw(self):
+        pyglet.gl.glClearColor(6/255., 64/255., 111/255., 255)
         if session.current_cutscene:
+            if session.current_cutscene == '1':
+                session.cutscene(FIRST_CUTSCENE)
             self.draw_cutscene()
             return
         glEnable(GL_BLEND)
@@ -1430,6 +1676,7 @@ class App:
         self.papp = PygletApp(width=1280,height=800)
         self.papp.sess = self.sess
         self.sess.app = self.papp
+        self.sess.aapp = self
         self.music = pyglet.media.Player()
         self.track1 = pyglet.media.load('data/music/hermetico-metro.ogg')
         self.track2 = pyglet.media.load('data/music/hermetico-2plus3.ogg')
@@ -1437,69 +1684,17 @@ class App:
         self.music.play()
         self.music.loop = True
 
+    def toggle_music(self):
+        if self.music.playing:
+            self.music.pause()
+        else:
+            self.music.next_source()
+            self.music.queue(random.choice([self.track1, self.track2]))
+            self.music.play()
+
     def run(self):
         self.papp.run()
 
-
-class Game:
-    hp = 100
-    laser_charges = 0
-    has_flashlight = False
-    has_boots = False
-    fuel = 0
-    map_discovered = 1
-    repair_kits = 0
-    location = 'wreckage'
-    situation = 'normal'
-
-    lastmsg = ''
-    question = ''
-
-
-
-import curses
-
-
-class ConsoleApp:
-    def init(self):
-        self.stdscr = curses.initscr()
-        curses.noecho()
-        curses.cbreak()
-
-    def turn(self):
-        Game.lastmsg = ''
-        Game.question = 'e - explore, t - tinker, w - wait'
-
-    def draw(self):
-        self.stdscr.clear()
-        self.stdscr.addstr(3,1, 'last key: ' + str(self.lastkey))
-        self.stdscr.addstr(4, 1, 'hp:' + str(Game.hp)
-                           + ' location:' + str(Game.location)
-                           + ' situation:' + str(Game.situation)
-                           )
-        self.stdscr.addstr(5, 1, Game.lastmsg)
-        self.stdscr.addstr(5, 1, Game.question)
-
-    def run(self):
-        self.init()
-        try:
-            self.stdscr.clear()
-            self.lastkey = None
-            while 1:
-                self.turn()
-                self.draw()
-                self.stdscr.refresh()
-                self.lastkey = self.stdscr.getkey()
-        finally:
-            self.remove()
-
-    def remove(self):
-        curses.nocbreak()
-        self.stdscr.keypad(False)
-        curses.echo()
-        curses.endwin()
-
 def main():
-    #app=ConsoleApp()
     app = App()
     app.run()

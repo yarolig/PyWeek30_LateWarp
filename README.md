@@ -14,8 +14,14 @@ Just launch ```run_game.py```
 WASD, Arrows - move  
 Shift        - move without pushing crates  
 R            - use warpback device (resets level, usually)    
-Space        - fire weapon  
-Escape       - quit game      
+Space        - fire weapon
+
+M            - toggle music
+F1           - show controlls
+F2           - show status         
+F3           - show last message      
+
+F10, Ctrl+Q  - quit game     
 ```
 
 ## Cheats:
