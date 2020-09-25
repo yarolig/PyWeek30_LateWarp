@@ -4,8 +4,19 @@ import random
 import copy
 import time
 
+
+
 from pyglet.gl import *
-from pyglet.media import player
+NO_SOUND = False
+try:
+    import pyglet.media
+except:
+    NO_SOUND = True
+
+#try:
+#    from pyglet.media import player
+#except:
+#    pass
 
 TILE_W = 64
 SPEED=6
@@ -381,8 +392,8 @@ class Bot(Monster):
                     result.insert(0, (x, y))
                     break
         else:
-            print('warning: no path')
-            draw_cost()
+            #print('warning: no path')
+            #draw_cost()
             pass
         #result.reverse()
 
@@ -1766,14 +1777,17 @@ class App:
         self.papp.sess = self.sess
         self.sess.app = self.papp
         self.sess.aapp = self
-        self.music = pyglet.media.Player()
-        self.track1 = pyglet.media.load('data/music/hermetico-metro.ogg')
-        self.track2 = pyglet.media.load('data/music/hermetico-2plus3.ogg')
-        self.music.queue(random.choice([self.track1, self.track2]))
-        self.music.play()
-        self.music.loop = True
+        if not NO_SOUND:
+            self.music = pyglet.media.Player()
+            self.track1 = pyglet.media.load('data/music/hermetico-metro.ogg')
+            self.track2 = pyglet.media.load('data/music/hermetico-2plus3.ogg')
+            self.music.queue(random.choice([self.track1, self.track2]))
+            self.music.play()
+            self.music.loop = True
 
     def toggle_music(self):
+        if NO_SOUND:
+            return
         if self.music.playing:
             self.music.pause()
         else:
