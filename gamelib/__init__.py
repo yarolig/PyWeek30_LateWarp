@@ -106,6 +106,7 @@ class Level:
         self.monsters = []
         self.decals = []
         self.entry_pos = (0,0)
+        self.cls = None
 
     def get_named_entry_txyc(self, entry_name):
         for x, y, c in enum_2d(self.m):
@@ -458,6 +459,7 @@ class Session:
             return
         self.current_cutscene = text
         self.cutscenes[self.current_cutscene] = True
+        self.app.make_label(text)
 
     def reinit(self, level_name=None):
         if not level_name:
@@ -498,6 +500,7 @@ class Session:
         self.player.x, self.player.y = tx*TILE_W, ty*TILE_W
         self.level = level
         self.player_copy = copy.copy(self.player)
+        self.level.cls.on_enter()
 
 
 
@@ -720,6 +723,10 @@ class LevelDef:
     def on_load():
         pass
 
+    @staticmethod
+    def on_enter():
+        pass
+
 class StartLevel(LevelDef):
     name = 'start'
     transitions = ''.split()
@@ -745,7 +752,7 @@ class EntranceLevel(LevelDef):
 ####################
 ####################
 ########1###########
-########-###########
+########.###########
 ######&^...#########
 ##...#.@...#########
 #2.00.........0.####
@@ -760,19 +767,33 @@ class DemoLevel(LevelDef):
     name = 'demo'
     transitions = 'entrance laserroom logistics'.split()
     data = '''
-..############3#....
-..#..P..p....#.#....
-###.#.##.##.g#.#....
+##############3#....
+###..P..p....#.#....
+##g.#.##.##.g#.#....
 2...#.##.##....#....
-##g...##....####....
-.##.#.##p#....0#....
-..#.#.##..g..g0#....
-..#...##.#.....#####
-..#.0p...#.....#.+.#
-..#................#
-..##########@#######
-...........#1#......
+###...##....########
+..#.#.##p#....0#..+#
+..#.#.##..g..g0#...#
+..#...##.#.....##.##
+..#.0p...#.........#
+..#............##-##
+#################@##
+................#1#.
 '''
+
+    def on_enter():
+        if session.player.has_warpback:
+            session.cutscene('''
+Warpback devices offers ultimate workers protection!
+Mining, heavy machinery and construction became extremely safe
+thanks to use of these devices.
+                ''')
+        else:
+            session.cutscene('''
+           "Warning!"
+    Hazardous area.
+    Warpback device required to enter.
+    ''')
 
 class WarpStorageLevel(LevelDef):
     name = 'warp_storage'
@@ -791,6 +812,13 @@ class WarpStorageLevel(LevelDef):
 ....................
 ....................
 '''
+    def on_load():
+        session.cutscene('''
+You entered some kind of equipment storage.
+Map of this storage is available on you phone.
+There is warpback device in far corner.
+Cool! You can use it remotely!
+''')
 
 
 class BoringLevel(LevelDef):
@@ -840,7 +868,7 @@ class LaserLevel(LevelDef):
 ####################
 #..............#..s#
 #..#.0#00#0s#......#
-#..????..????..#####
+#..====..====..#####
 #..#..#p.#..#.....P#
 #p.............#...#
 ####...######..#####
@@ -863,8 +891,8 @@ class Laser2Level(LevelDef):
 ########1###########
 ####....@.....######
 ####...............2
-####..L..+....######
-####..........######
+####==L==+===.######
+####..#..#..#.######
 #############.######
 #######........#####
 #######..g#..g.#####
@@ -1028,16 +1056,16 @@ class CybergoatLevel(LevelDef):
     transitions = 'boring fuel'.split()
     data = '''
 #1##################
-#@..gggOggggg.....?#
-#...ggggggggg......#
+#@#......#...#.....#
+#.#.s#...#...#.....#
+#....#0#.....#.....#
+##...0...#...#.....#
+##...#.....S...s...#
+##..s........#.....#
+##.###...#######...#
 #..................2
-#..##...##..###....#
-#..s........#......#
-#...#....S....s....#
-#...0...#...#......#
-#...#0#.....#......#
-#..s#...#...#......#
-#.......#...#......#
+#====ggggggggg=====#
+#====gggOggggg=====#
 ####################
 '''
 
@@ -1053,6 +1081,9 @@ def char_to_cell(ch) -> Cell:
         c = Cell('floor')
         return c
 
+    if ch == '=':
+        c = Cell('furniture')
+        return c
     if ch == ",":
         c = Cell('ground')
         return c
@@ -1165,6 +1196,7 @@ def load_level(level_class) -> Level:
         if isinstance(m, Bot):
             #print("WP prepare for", m)
             m.prepare_waypoints(level)
+    level.cls = level_class
     level_class.on_load()
     return level
 
@@ -1202,6 +1234,23 @@ class PygletApp(pyglet.window.Window):
         self.push_handlers(self.keys)
         self.images = {}
         self.frameno = 0
+        self.label = None
+        self.hint = pyglet.text.Label('(press space to continue)', multiline=True,
+                                 #font_name='Times New Roman',
+                                 font_size=12,
+                                 x=70, y=self.height * 1 // 10,
+                                 width = self.width - 140
+                                 #anchor_x='center', anchor_y='center'
+                                 )
+
+    def make_label(self, text):
+        self.label= pyglet.text.Label(text, multiline=True,
+                                 #font_name='Times New Roman',
+                                 font_size=24,
+                                 x=70, y=self.height * 8 // 10,
+                                 width = self.width - 140
+                                 #anchor_x='center', anchor_y='center'
+                                 )
 
     def update(self, dt):
         #print('update', dt)
@@ -1280,6 +1329,8 @@ class PygletApp(pyglet.window.Window):
         kk = session.app.keys
         if kk[k.ESCAPE] or kk[k.SPACE] or kk[k.ENTER] or kk[k.RETURN]:
             session.current_cutscene = ''
+        self.label.draw()
+        self.hint.draw()
         self.fps_display.draw()
         self.flip()
 
