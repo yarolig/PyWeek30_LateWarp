@@ -318,20 +318,23 @@ class Bot(Monster):
 class Player(Monster):
     def __init__(self, *args, **kwargs):
         Monster.__init__(self, *args, **kwargs)
+        self.fire_range = 2
 
     def ai(self):
         self.clear_input()
-        if session.app.keys[pyglet.window.key.W] or session.app.keys[pyglet.window.key.UP]:
+        k = pyglet.window.key
+        kk = session.app.keys
+        if kk[k.W] or kk[k.UP] or kk[k.K]:
             self.in_w = True
-        if session.app.keys[pyglet.window.key.S] or session.app.keys[pyglet.window.key.DOWN]:
+        if kk[k.S] or kk[k.DOWN] or kk[k.J]:
             self.in_s = True
-        if session.app.keys[pyglet.window.key.A] or session.app.keys[pyglet.window.key.LEFT]:
+        if kk[k.A] or kk[k.LEFT] or kk[k.H]:
             self.in_a = True
-        if session.app.keys[pyglet.window.key.D] or session.app.keys[pyglet.window.key.RIGHT]:
+        if kk[k.D] or kk[k.RIGHT] or kk[k.L]:
             self.in_d = True
-        if session.app.keys[pyglet.window.key.SPACE]:
+        if kk[k.SPACE]:
             self.in_kick = True
-        if session.app.keys[pyglet.window.key.LSHIFT]  or session.app.keys[pyglet.window.key.RSHIFT]:
+        if kk[k.LSHIFT]  or kk[k.RSHIFT]:
             self.in_walk = True
 
 
@@ -367,6 +370,9 @@ class Battery(Object):
     name = 'battery'
     pickable = True
 
+class Boots(Object):
+    name = 'boots'
+    pickable = True
 
 class Decal:
     def __init__(self, name, x=0, y=0):
@@ -428,10 +434,11 @@ class Session:
 
 
     def cells_in_range(self, tx, ty, r):
+        #print('cir')
         for i in range(tx-r-1, tx+r+1):
             for j in range(ty-r-1, ty+r+1):
-                if abs(tx - i) + abs(ty - j) > r:
-                    #print('r:', tx, i, ty,  abs(tx - i) + abs(ty - j), r)
+                #print('r:', (tx, ty), (i, j), (tx - i) ** 2 + (ty - j) ** 2, r ** 2, (tx - i)**2 + (ty - j)**2 > r**2)
+                if (tx - i)**2 + (ty - j)**2 > r**2:
                     continue
                 if 0 <= i < len(self.level.m[0]) and 0 <= j < len(self.level.m):
                     yield i, j, self.level.m[j][i]
@@ -450,8 +457,11 @@ class Session:
                                  (ssy+tsy) // 2 * TILE_W)
         if manh_dist((ssx,ssy), (tsx,tsy)) <= 1:
             return True
-        if c and c.passable and c.vacant:
-            return True
+        if c and c.passable:
+            if c.vacant:
+                return True
+            if isinstance(c.used_by, Monster):
+                return True
         return False
 
     def add_ray(self, src, tgt):
@@ -678,7 +688,7 @@ class WarpStorageLevel(LevelDef):
 
 class BoringLevel(LevelDef):
     name = 'boring'
-    transitions = 'logistics'.split()
+    transitions = 'logistics goatroom envroom'.split()
     data = '''
 ####################
 ##p#####..#p#####P##
@@ -688,11 +698,11 @@ class BoringLevel(LevelDef):
 1@.0000#..#.##0.0..#
 ##.0.0.#....##0.0..#
 ##...0.#..#.##....g#
-##.0.0.#.....0.....?
+##.0.0.#.....0.....3
 ##..#######.##..g..#
 ##.g....g...########
 ##....g...g.########
-#######?############
+#######2############
 '''
 
 
@@ -754,6 +764,24 @@ class Laser2Level(LevelDef):
 ####################
 '''
 # Compact battery production
+class BatteryLevel(LevelDef):
+    name = 'batt'
+    transitions = 'envroom'.split()
+    data = '''
+####################
+#..................#
+#..................#
+#..................#
+#..................#
+#..................#
+#..................#
+#..................#
+#........B.........#
+#..................#
+#........@.........#
+#########1##########
+'''
+
 
 # Communication room
 class CommroomLevel(LevelDef):
@@ -796,14 +824,115 @@ class LogisticsLevel(LevelDef):
 # Spaceport
 
 # Fuel storage
+class FuelLevel(LevelDef):
+    name = 'fuel'
+    transitions = 'goatroom envroom'.split()
+    data = '''
+###############2####
+#....##....#.#.....#
+#....#1@...#.####.##
+#....##....0.#....S#
+#....##....#.#.#####
+#....##....#.#.....#
+#....####0##0####.##
+#....##...#..#.ss..#
+#....##......#.ss..#
+#....##...#.00.ss..#
+#....##...#..#.....#
+####################
+'''
+
+    dataR = '''
+###########1########
+2.....#.#..@.##....#
+##.####.#....##....#
+#S....#.0....##....#
+#####.#.#....##....#
+#.....#.#....##....#
+##.####0##0####....#
+#..ss.#..#...##....#
+#..ss.#......##....#
+#..ss.00.#...##....#
+#.....#..#...##....#
+####################
+'''
 
 # Environment control
 
 # Artifical gravity engines
-
+class GravityLevel(LevelDef):
+    name = 'gravity'
+    transitions = 'boring fuel'.split()
+    data = '''
+########1###########
+#..................#
+#..................#
+#..s.s.............#
+#...&..............#
+#..s.s...@.........2
+#..................#
+#..................#
+#..................#
+#..................#
+#..................#
+####################
+'''
+# Environment control
+class EnvLevel(LevelDef):
+    name = 'envroom'
+    transitions = 'boring fuel batt'.split()
+    data = '''
+###3################
+###p######.........#
+#P.......#.........#
+#####0##.#...#######
+1@....##.##..#.....#
+#####.0..0####....C#
+#######...........&#
+#.....#...####....S#
+#.....##0##..#.....#
+#.....#..#...#######
+#.....#..#.........#
+#######2############
+'''
 # Robot maintenance
+class BotLevel(LevelDef):
+    name = 'botroom'
+    transitions = ''.split()
+    data = '''
+####################
+###.....sp.........#
+>.#.....c..........#
+#.#..######M.M###P.#
+#..sc#M..###.####sc#
+###p.#&......####..#
+###..#M..########..#
+###..#####....Sp...#
+#@##....sp.....c....#
+>.#....C...#######.#
+##############.....#
+##############>#####
+'''
+
 
 # Cybergoat production
+class CybergoatLevel(LevelDef):
+    name = 'goatroom'
+    transitions = 'boring fuel'.split()
+    data = '''
+#1##################
+#@..gggOggggg.....?#
+#...ggggggggg......#
+#..................2
+#..##...##..###....#
+#..s........#......#
+#...#....S....s....#
+#...0...#...#......#
+#...#0#.....#......#
+#..s#...#...#......#
+#.......#...#......#
+####################
+'''
 
 all_levels = LevelDef.__subclasses__()
 
@@ -813,7 +942,7 @@ def char_to_cell(ch) -> Cell:
         c.passable = False
         return c
 
-    if ch in ".,;:\'\"@g0WL":
+    if ch in ".,;:\'\"@g0WLBO":
         c = Cell('floor')
         return c
 
@@ -825,7 +954,7 @@ def char_to_cell(ch) -> Cell:
         c = Cell('computer')
         return c
 
-    if ch in "PpCcSs":
+    if ch in "PpCcSsMm":
         c = Cell('waypoint')
         c.waypoint_char = str.lower(ch)
         return c
@@ -849,10 +978,12 @@ def char_to_object(ch):
         return Laser()
     if ch == 'B':
         return Battery()
+    if ch == 'O':
+        return Boots()
 
 
 def char_to_monster(ch):
-    if ch in 'PCS':
+    if ch in 'PCSM':
         m= Bot('security')
         m.char = str.lower(ch)
         return m
@@ -1012,7 +1143,7 @@ class PygletApp(pyglet.window.Window):
             self.draw_sprite(m.tilename + asuf, m.x, m.y)
             m.attacking = False
         p=session.player
-        if p.hp >=0:
+        if p.hp > 0:
             self.draw_sprite('player', p.x, p.y)
         else:
             self.draw_sprite('warp_anim%d' % (self.frameno // 5 % 3 + 1), p.x, p.y)
@@ -1039,9 +1170,11 @@ class App:
         self.papp.sess = self.sess
         self.sess.app = self.papp
         self.music = pyglet.media.Player()
-        self.track = pyglet.media.load('data/music/hermetico-metro.ogg')
-        self.music.queue(self.track)
+        self.track1 = pyglet.media.load('data/music/hermetico-metro.ogg')
+        self.track2 = pyglet.media.load('data/music/hermetico-2plus3.ogg')
+        self.music.queue(random.choice([self.track1, self.track2]))
         self.music.play()
+        self.music.loop = True
 
     def run(self):
         self.papp.run()
