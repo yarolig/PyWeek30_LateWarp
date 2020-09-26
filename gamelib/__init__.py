@@ -113,32 +113,42 @@ class Cell:
 class Gate(Cell):
     def on_present(self):
         if session.player.has_warpback:
+            if self.name != 'floor':
+                self.name = 'floor'
+                session.app.update_floor()
             self.passable = True
-            self.name = 'floor'
         else:
+            if self.name != 'gate':
+                self.name = 'gate'
+                session.app.update_floor()
             self.passable = False
-            self.name = 'gate'
-
+            
 
 class GateBoot(Cell):
     def on_present(self):
         if session.player.has_boots:
+            if self.name != 'floor':
+                self.name = 'floor'
+                session.app.update_floor()
             self.passable = True
-            self.name = 'floor'
         else:
+            if self.name != 'gate':
+                self.name = 'gate'
+                session.app.update_floor()
             self.passable = False
-            self.name = 'gate'
-
 
 class GateDefense(Cell):
     def on_present(self):
         if not session.defense_on and session.gravity_on:
+            if self.name != 'floor':
+                self.name = 'floor'
+                session.app.update_floor()
             self.passable = True
-            self.name = 'floor'
         else:
+            if self.name != 'gate':
+                self.name = 'gate'
+                session.app.update_floor()
             self.passable = False
-            self.name = 'gate'
-
 
 
 class Computer(Cell):
@@ -154,8 +164,9 @@ class GravityComputer(Cell):
     def on_step(self):
         #print('on_step')
         self.name = 'computer_broken'
-        session.gravity_on = False
-
+        if session.gravity_on:
+            session.gravity_on = False
+            session.app.update_floor()
 
 class Level:
     def __init__(self, w=10, h=10):
@@ -517,6 +528,7 @@ facing2dir = {
 
 class Session:
     def __init__(self):
+        self.app =None
         self.loaded_levels = {}
         self.player = Player()
         self.player_copy = copy.copy(self.player)
@@ -551,6 +563,9 @@ class Session:
         self.player = copy.copy(self.player_copy)
         self.player.x, self.player.y = self.level.entry_pos
         self.level.cls.on_enter()
+        
+        if self.app:
+            self.app.update_floor()
 
     def load_level_by_name(self, lname):
         for i in all_levels:
@@ -580,6 +595,9 @@ class Session:
         self.level = level
         self.player_copy = copy.copy(self.player)
         self.level.cls.on_enter()
+
+        if self.app:
+            self.app.update_floor()
 
 
 
@@ -696,6 +714,7 @@ class Session:
             mtx, mty, mc = self.xy2ctxy(m.x, m.y)
             if mc.name == 'floor':
                 mc.name = 'ashes'
+                session.app.update_floor()
             if m is not self.player:
                 self.level.monsters.remove(m)
             return
@@ -1510,6 +1529,8 @@ class PygletApp(pyglet.window.Window):
         self.push_handlers(self.keys)
         self.images = {}
         self.frameno = 0
+        self.batch = None
+        self.sprites = []
         self.label = None
         self.hint = pyglet.text.Label('(press space to continue)', multiline=True,
                                  #font_name='Times New Roman',
@@ -1672,6 +1693,16 @@ All right.
         self.fps_display.draw()
         #self.flip()
 
+    def update_floor(self):
+        for i in self.sprites:
+            try:
+                i.delete()
+            except:
+                pass
+        self.sprites = []
+        self.batch=None
+        
+        
     def on_draw(self):
         pyglet.gl.glClearColor(6/255., 64/255., 111/255., 255)
         if session.current_cutscene:
@@ -1685,10 +1716,27 @@ All right.
         #print('draw')
         self.clear()
 
-        for x, y, c in enum_2d(session.level.m):
-            self.draw_sprite(c.name ,x*64,y*64)
+        k = pyglet.window.key
+        kk = session.app.keys
+
+        n=0
+        if self.batch is None:
+            self.batch = pyglet.graphics.Batch()
+        
+            for x, y, c in enum_2d(session.level.m):
+                self.draw_sprite(c.name ,x*64,y*64, batch=self.batch)
+                n+=1
+
+        if not kk[k.F11] and self.batch is not None:            
+            self.batch.draw()
+
         for o in session.level.objects:
             self.draw_sprite(o.name, o.x, o.y)
+
+        #print(self.batch)
+        print(n, 'len sprites:', len(self.sprites))
+        #for i in self.sprites:
+        #    i.delete()
 
         for m in session.level.monsters:
             if not session.gravity_on and m.name == 'security':
@@ -1754,15 +1802,21 @@ All right.
             time.sleep(0.001*DELAY)
         #self.flip()
 
-    def draw_sprite(self, name, x, y, xx=None, yy=None):
+    def draw_sprite(self, name, x, y, xx=None, yy=None, batch=None):
 
         if name not in self.images:
-            self.images[name]=pyglet.image.load('data/pics/%s.png'%name)
-            remove_guidelines(self.images[name])
+            
+            #self.images[name]=pyglet.image.load('data/pics/%s.png'%name)
+            self.images[name]=pyglet.resource.image('data/pics/%s.png'%name)
+
+            #remove_guidelines(self.images[name])
         #if xx is not None:
         #    self.images[name].blit(x,y,xx,yy)
         #else:
-        self.images[name].blit(x, y)
+        if batch is not None:
+            self.sprites.append(pyglet.sprite.Sprite(self.images[name], x, y, batch=batch))
+        else:
+            self.images[name].blit(x, y)
 
 
 class App:
