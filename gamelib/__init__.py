@@ -150,6 +150,19 @@ class GateDefense(Cell):
                 session.app.update_floor()
             self.passable = False
 
+class GateGravity(Cell):
+    def on_present(self):
+        if session.gravity_on:
+            if self.name != 'floor':
+                self.name = 'floor'
+                session.app.update_floor()
+            self.passable = True
+        else:
+            if self.name != 'gate':
+                self.name = 'gate'
+                session.app.update_floor()
+            self.passable = False
+
 
 class Computer(Cell):
     def on_step(self):
@@ -510,6 +523,15 @@ class Medkit(Object):
     def on_pick(self, m: Monster):
         if m.hp < 30:
             m.hp = 30
+
+
+class HealthBoost(Object):
+    name = 'hp_boost'
+    pickable = True
+    def on_pick(self, m: Monster):
+        if m.hp < 75:
+            m.hp = 75
+
 
 
 class Decal:
@@ -974,23 +996,6 @@ class BoringLevel(LevelDef):
 '''
 
 
-class BigroomLevel(LevelDef):
-    name = 'bigroom'
-    transitions = ''.split()
-    data = '''
-####################
-#..................#
-#..................#
-#..................#
-#..................#
-#........@.........#
-#..................#
-#..................#
-#..................#
-#..................#
-#..................#
-####################
-'''
 
 
 # Laser cutting
@@ -1038,6 +1043,30 @@ class Laser2Level(LevelDef):
 ####################
 '''
 
+
+class BigroomLevel(LevelDef):
+    name = 'bigroom'
+    transitions = 'gravity'.split()
+    data = '''
+####################
+#....#...#...#######
+1@##.#.0.....#######
+#....0...#...#######
+#....##0############
+#..#00...#.........#
+#..#..#..#..!......#
+#..0..0..#S........#
+##0#.##00#########Y#
+#..#..#............#
+#.....0..ssssssssss#
+####################
+'''
+    @staticmethod
+    def on_enter():
+        session.player.has_laser = False
+        session.cutscene('''
+You hear a sound reminiscent guard bot stepping on a syringe.
+''')
 
 class EndLevel(LevelDef):
     name = 'end'
@@ -1246,14 +1275,14 @@ class FuelLevel(LevelDef):
 
 class GravityLevel(LevelDef):
     name = 'gravity'
-    transitions = 'envroom goatroom'.split()
+    transitions = 'envroom goatroom bigroom'.split()
     data = '''
 ####################
 #..................#
 #.....#######......#
 ####..#.s.s.#..#####
 #gm#..#..%..#..#.M.#
-2..#..#.s.s.#..#...#
+2..#..#.s.s.#..#...3
 #..#..###.###..#...#
 #..0...........0...#
 ####...........#####
@@ -1356,7 +1385,7 @@ def char_to_cell(ch) -> Cell:
         c.passable = False
         return c
 
-    if ch in ".;:\'@g0WLBO|+":
+    if ch in ".;:\'@g0WLBO|+!":
         c = Cell('floor')
         return c
 
@@ -1377,6 +1406,10 @@ def char_to_cell(ch) -> Cell:
 
     if ch == '/':
         c = GateDefense('gate')
+        return c
+
+    if ch == 'Y':
+        c = GateGravity('gate')
         return c
 
     if ch == "$":
@@ -1433,6 +1466,9 @@ def char_to_object(ch):
         return Boots()
     if ch == '+':
         return Medkit()
+
+    if ch == '!':
+        return HealthBoost()
 
 
 def char_to_monster(ch):
@@ -1793,6 +1829,11 @@ All right.
         if p.hp >= 30:
             self.draw_sprite('circle', cx, cy, 16, 16)
             self.draw_sprite('hp', cx, cy, 16, 16)
+            cx += dx
+
+        if p.hp >= 40:
+            self.draw_sprite('circle', cx, cy, 16, 16)
+            self.draw_sprite('hp_boost', cx, cy, 16, 16)
             cx += dx
         glDisable(GL_BLEND)
         self.fps_display.draw()
