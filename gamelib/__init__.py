@@ -1063,7 +1063,6 @@ class BigroomLevel(LevelDef):
 '''
     @staticmethod
     def on_enter():
-        session.player.has_laser = False
         session.cutscene('''
 You hear a sound reminiscent guard bot stepping on a syringe.
 ''')
