@@ -1175,7 +1175,7 @@ class SpaceLevel(LevelDef):
     transitions = 'goatroom comm end'.split()
     data = '''
 #########3##########
-#.......#/#...+LW..#
+#.S.....#/#...+LW..#
 #.......#&#........#
 #########"######.###
 #..................#
@@ -1204,9 +1204,9 @@ A big sign tells you:
             session.cutscene('''
 Access disallowed while defense system active.
         ''')
-        if not session.gravity_on:
+        elif not session.gravity_on:
             session.cutscene('''
-Access disallowed while gravity not working.
+Access disallowed: error in artificial gravity system.
 ''')
 
 # Fuel storage
@@ -1243,9 +1243,7 @@ class FuelLevel(LevelDef):
 ####################
 '''
 
-# Environment control
 
-# Artifical gravity engines
 class GravityLevel(LevelDef):
     name = 'gravity'
     transitions = 'envroom goatroom'.split()
@@ -1268,11 +1266,11 @@ class GravityLevel(LevelDef):
     def on_enter():
         if session.player.has_warpback:
             session.cutscene('''
-These room controls artifical gravity.
+These room controls artificial gravity.
 I should be careful here.
-    ''')
+''')
 
-# Environment control
+
 class EnvLevel(LevelDef):
     name = 'envroom'
     transitions = 'boring fuel gravity'.split()
@@ -1297,7 +1295,7 @@ This computer controlls oxyden regeneration.
 I shoud not touch this.        
 ''')
 
-# Robot maintenance
+
 class BotLevel(LevelDef):
     name = 'botroom'
     transitions = 'boring fuel'.split()
@@ -1306,9 +1304,9 @@ class BotLevel(LevelDef):
 #@#.....sp.........#
 #.#.....c..........#
 #.#..######M.M###P.#
-#..sc#M..###.####sc#
+#..sc#...###.####sc#
 ###p.#&......####..#
-###..#M..########..#
+###..#...########..#
 ###..#####....Sp...#
 ####....sp.....c...#
 ###....C...######.##
@@ -1734,7 +1732,7 @@ All right.
             self.draw_sprite(o.name, o.x, o.y)
 
         #print(self.batch)
-        print(n, 'len sprites:', len(self.sprites))
+        #print(n, 'len sprites:', len(self.sprites))
         #for i in self.sprites:
         #    i.delete()
 
